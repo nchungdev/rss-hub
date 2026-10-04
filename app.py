@@ -146,7 +146,29 @@ async def api_create_or_update_feed(request: Request):
     use_flaresolverr = bool(data.get("use_flaresolverr", False))
     selectors = data.get("selectors", {})
 
+    original_slug = sanitize_slug(data.get("original_slug", ""))
     feeds = load_feeds()
+
+    created_at = None
+    if original_slug and original_slug in feeds:
+        created_at = feeds[original_slug].get("created_at")
+    elif slug in feeds:
+        created_at = feeds[slug].get("created_at")
+    if not created_at:
+        created_at = datetime.now(timezone.utc).isoformat()
+
+    # If slug was renamed, delete old key and move history cache
+    if original_slug and original_slug != slug:
+        if original_slug in feeds:
+            del feeds[original_slug]
+            old_cache = os.path.join(DATA_DIR, f"history_{original_slug}.json")
+            new_cache = os.path.join(DATA_DIR, f"history_{slug}.json")
+            if os.path.exists(old_cache):
+                try:
+                    os.rename(old_cache, new_cache)
+                except Exception:
+                    pass
+
     feeds[slug] = {
         "slug": slug,
         "title": title,
@@ -159,13 +181,22 @@ async def api_create_or_update_feed(request: Request):
         "cookie": cookie,
         "use_flaresolverr": use_flaresolverr,
         "selectors": selectors,
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "created_at": created_at,
+        "updated_at": datetime.now(timezone.utc).isoformat()
     }
     save_feeds(feeds)
     
     # Trigger initial scrape in background
     asyncio.create_task(asyncio.to_thread(get_feed_posts, slug, True))
     return {"status": "ok", "slug": slug}
+
+@app.get("/api/feeds/{slug}")
+def api_get_feed_detail(slug: str):
+    clean_slug = sanitize_slug(slug)
+    feeds = load_feeds()
+    if clean_slug in feeds:
+        return feeds[clean_slug]
+    raise HTTPException(status_code=404, detail="Kênh feed không tồn tại")
 
 @app.delete("/api/feeds/{slug}")
 def api_delete_feed(slug: str):
@@ -234,101 +265,105 @@ async def dashboard(request: Request):
         else:
             cookie_badge = '<span class="badge" style="padding: 2px 7px; font-size: 0.65rem; opacity:0.65;" title="Chế độ Guest / Không dùng cookie">Guest</span>'
 
-        # Recent items preview
+        # Recent items preview (sleek single row per article)
         preview_items_html = ""
         for p in posts[:3]:
             user = p.get("username", "web")
             first_line = p.get("preview_title") or (p.get("text", "").split("\n")[0][:110] if p.get("text") else "Bài viết không có tiêu đề")
             gdrive = p.get("gdrive_links", [])
-            badge = '<span class="badge cyan" style="padding: 2px 8px; font-size: 0.68rem;"><span class="dot"></span> Ebook Drive</span>' if gdrive else ""
+            badge = '<span class="badge cyan" style="padding: 2px 7px; font-size: 0.65rem;"><span class="dot"></span> Ebook Drive</span>' if gdrive else ""
             item_url = p.get("url", "#")
             
             preview_items_html += f"""
-            <div style="background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 4px;">
-                <div style="display: flex; align-items: center; justify-content: space-between;">
-                    <a href="{item_url}" target="_blank" rel="noopener noreferrer" style="font-weight: 600; font-size: 0.75rem; color: #38bdf8; text-decoration: none; max-width: 80%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">🌐 {user}</a>
-                    {badge}
+            <div style="background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; padding: 6px 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <div style="min-width: 0; flex: 1;">
+                    <a href="{item_url}" target="_blank" rel="noopener noreferrer" style="font-weight: 600; font-size: 0.75rem; color: #38bdf8; text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">🌐 {first_line}</a>
+                    <div style="color: var(--text-dim); font-size: 0.68rem; margin-top: 1px;">Nguồn / Tác giả: {user}</div>
                 </div>
-                <div style="color: var(--text-muted); font-size: 0.76rem; line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">
-                    {first_line}
-                </div>
+                {badge}
             </div>
             """
 
         feed_cards += f"""
         <div class="task-card feed-item" data-category="{cat}">
-            <div class="task-card-head">
-                <div style="display: flex; align-items: center; gap: 14px;">
-                    <div class="brand-icon" style="background: linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(99, 102, 241, 0.25)); border: 1px solid rgba(14, 165, 233, 0.3);">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 22px; height: 22px; color: #38bdf8;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                <!-- Left: Feed Icon & Meta Info -->
+                <div style="display: flex; align-items: center; gap: 12px; min-width: 260px; flex: 1;">
+                    <div class="brand-icon" style="width: 36px; height: 36px; min-width: 36px; border-radius: 10px; background: linear-gradient(135deg, rgba(14, 165, 233, 0.2), rgba(99, 102, 241, 0.2)); border: 1px solid rgba(14, 165, 233, 0.3);">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px; color: #38bdf8;">
                             {icon_svg}
                         </svg>
                     </div>
-                    <div>
+                    <div style="min-width: 0;">
                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                            <span style="font-size: 0.68rem; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.05em;">{cat}</span>
-                            <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.06); color: var(--text-dim); border: 1px solid var(--card-border);">{type_badge}</span>
+                            <span class="task-title" style="font-size: 0.96rem; font-weight: 700; color: #ffffff;">{meta['title']}</span>
+                            <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 5px; background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3); text-transform: uppercase;">{cat}</span>
+                            <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 5px; background: rgba(255,255,255,0.06); color: var(--text-dim); border: 1px solid var(--card-border);">{type_badge}</span>
                             {cookie_badge}
                         </div>
-                        <div class="task-title" style="margin-top: 2px;">{meta['title']}</div>
+                        <div style="display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 0.73rem; color: var(--text-dim); flex-wrap: wrap;">
+                            <span style="font-family: var(--mono); color: var(--text-muted); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{meta.get('target', slug)}">🎯 {meta.get('target', slug)}</span>
+                            <span>•</span>
+                            <span style="color: #34d399; font-weight: 600;">{count} bài viết</span>
+                            {f'<span>•</span><span style="max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim);" title="{meta.get("description", "")}">{meta.get("description", "")}</span>' if meta.get("description") else ''}
+                        </div>
                     </div>
                 </div>
 
-                <div class="badge green">
-                    <span class="dot"></span>
-                    <span>{count} bài viết</span>
+                <!-- Right: Format Endpoints & Scraper Actions -->
+                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                    <!-- Format Buttons Group (XML, JSON, ATOM) -->
+                    <div class="format-btn-group" style="margin: 0; gap: 4px;">
+                        <a href="{BASE_URL}/{slug}.xml" target="_blank" rel="noopener noreferrer" class="format-btn xml" style="height: 30px; padding: 0 9px; font-size: 0.72rem;" title="Mở RSS 2.0 (XML): {BASE_URL}/{slug}.xml">
+                            <span>XML</span>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 11px; height: 11px; opacity: 0.7;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        </a>
+                        <a href="{BASE_URL}/{slug}.json" target="_blank" rel="noopener noreferrer" class="format-btn json" style="height: 30px; padding: 0 9px; font-size: 0.72rem;" title="Mở JSON Feed: {BASE_URL}/{slug}.json">
+                            <span>JSON</span>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 11px; height: 11px; opacity: 0.7;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        </a>
+                        <a href="{BASE_URL}/{slug}.atom" target="_blank" rel="noopener noreferrer" class="format-btn atom" style="height: 30px; padding: 0 9px; font-size: 0.72rem;" title="Mở Atom Feed: {BASE_URL}/{slug}.atom">
+                            <span>ATOM</span>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 11px; height: 11px; opacity: 0.7;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        </a>
+                    </div>
+
+                    <div style="width: 1px; height: 18px; background: var(--card-border); margin: 0 2px;"></div>
+
+                    <!-- Toggle Preview -->
+                    <button class="btn" onclick="toggleFeedPreview('{slug}')" id="btnPreview_{slug}" title="Xem trước bài viết vừa cào" style="height: 30px; padding: 0 9px; font-size: 0.74rem;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        <span>Bài viết</span>
+                        <svg id="chevronPreview_{slug}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px; transition: transform 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+
+                    <!-- Edit Scraper Config -->
+                    <button class="btn" onclick="editFeedModal('{slug}')" title="Sửa cấu hình Feed này" style="height: 30px; padding: 0 9px; font-size: 0.74rem;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                        <span>Sửa</span>
+                    </button>
+
+                    <!-- Refresh / Scrape Now -->
+                    <button class="btn primary" onclick="refreshFeed('{slug}', this)" title="Cào mới dữ liệu ngay" style="height: 30px; padding: 0 10px; font-size: 0.74rem;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                        <span>Cào</span>
+                    </button>
+
+                    <!-- Delete -->
+                    <button class="btn danger" onclick="deleteFeed('{slug}')" title="Xóa kênh Feed này" style="height: 30px; padding: 0 8px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    </button>
                 </div>
             </div>
 
-            <div style="color: var(--text-muted); font-size: 0.8rem; line-height: 1.5; margin: 4px 0 8px 0;">
-                {meta.get('description', '')}
-            </div>
-
-            <!-- Feed Format Buttons (XML, JSON, ATOM) -->
-            <div class="format-btn-group">
-                <a href="{BASE_URL}/{slug}.xml" target="_blank" rel="noopener noreferrer" class="format-btn xml" title="Mở RSS 2.0 (XML): {BASE_URL}/{slug}.xml">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; flex-shrink: 0;"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>
-                    <span>XML</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px; opacity: 0.6; flex-shrink: 0;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                </a>
-                <a href="{BASE_URL}/{slug}.json" target="_blank" rel="noopener noreferrer" class="format-btn json" title="Mở JSON Feed: {BASE_URL}/{slug}.json">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; flex-shrink: 0;"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-                    <span>JSON</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px; opacity: 0.6; flex-shrink: 0;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                </a>
-                <a href="{BASE_URL}/{slug}.atom" target="_blank" rel="noopener noreferrer" class="format-btn atom" title="Mở Atom Feed: {BASE_URL}/{slug}.atom">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; flex-shrink: 0;"><circle cx="12" cy="12" r="3"/><line x1="3" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="21" y2="12"/><line x1="12" y1="3" x2="12" y2="9"/><line x1="12" y1="15" x2="12" y2="21"/></svg>
-                    <span>ATOM</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px; opacity: 0.6; flex-shrink: 0;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                </a>
-            </div>
-
-            <!-- Recent Items Box -->
-            <div style="margin-top: 6px;">
-                <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <!-- Collapsible Preview Drawer -->
+            <div id="drawerPreview_{slug}" style="display: none; margin-top: 6px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.06);">
+                <div style="font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                     <span>Bài viết vừa cào gần đây</span>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr; gap: 8px;">
-                    {preview_items_html if preview_items_html else '<div style="color:var(--text-dim); font-size:0.75rem; font-style:italic;">Chưa có dữ liệu bài viết (bấm cào mới ngay bên dưới).</div>'}
-                </div>
-            </div>
-
-            <!-- Card Action Footer -->
-            <div class="task-card-footer" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--card-border);">
-                <div style="display: flex; align-items: center; gap: 8px; font-size: 0.74rem; color: var(--text-dim);">
-                    <span class="dot" style="background: #0ea5e9;"></span>
-                    <span>Nguồn: <strong style="color:var(--text); font-family:var(--mono);">{meta.get('target', slug)}</strong></span>
-                </div>
-                <div class="task-actions-row">
-                    <button class="btn danger" onclick="deleteFeed('{slug}')" title="Xóa kênh Feed này" style="height: 32px; padding: 0 10px;">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                        <span>Xóa</span>
-                    </button>
-                    <button class="btn primary" onclick="refreshFeed('{slug}', this)" style="height: 32px; padding: 0 12px;">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-                        <span>Cào mới ngay</span>
-                    </button>
+                <div style="display: grid; grid-template-columns: 1fr; gap: 6px;">
+                    {preview_items_html if preview_items_html else '<div style="color:var(--text-dim); font-size:0.75rem; font-style:italic; padding:4px 0;">Chưa có dữ liệu bài viết (bấm nút Cào để tải).</div>'}
                 </div>
             </div>
         </div>
@@ -794,17 +829,17 @@ async def dashboard(request: Request):
     .task-list {{
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 10px;
     }}
     .task-card {{
       background: var(--card-bg);
       border: 1px solid var(--card-border);
-      border-radius: 16px;
-      padding: 20px;
+      border-radius: 14px;
+      padding: 12px 18px;
       backdrop-filter: blur(12px);
       display: flex;
       flex-direction: column;
-      gap: 14px;
+      gap: 6px;
       transition: all 0.2s ease;
     }}
     .task-card:hover {{
@@ -1089,7 +1124,7 @@ async def dashboard(request: Request):
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/></svg>
         <span>Danh sách Feeds</span>
       </a>
-      <button class="nav-item" onclick="openModal('modalAdd')">
+      <button class="nav-item" onclick="openAddFeedModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         <span>Thêm kênh mới</span>
       </button>
@@ -1129,7 +1164,7 @@ async def dashboard(request: Request):
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px; height:15px;"><path d="M21 2l-2 2m-1.5 1.5L14 9l-1.5-1.5L11 9l-1.5-1.5L8 9l-1.5-1.5-4 4a5 5 0 0 0 7 7l4-4 1.5 1.5L16 15l1.5-1.5L19 15l1.5-1.5 2-2"/></svg>
           <span>Kho Cookie</span>
         </button>
-        <button class="btn primary" onclick="openModal('modalAdd')">
+        <button class="btn primary" onclick="openAddFeedModal()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           <span>Thêm kênh Feed</span>
         </button>
@@ -1195,7 +1230,7 @@ async def dashboard(request: Request):
         </div>
 
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-          <button class="btn primary" onclick="openModal('modalAdd')" title="Thêm nguồn RSS mới">
+          <button class="btn primary" onclick="openAddFeedModal()" title="Thêm nguồn RSS mới">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             <span>Thêm kênh mới</span>
           </button>
@@ -1238,11 +1273,12 @@ async def dashboard(request: Request):
   <div id="modalAdd" class="modal-overlay" onclick="handleModalClick(event, 'modalAdd')">
     <div class="modal-card">
       <div class="modal-head">
-        <h2 class="modal-title">Tạo Kênh RSS Mới (Universal Feed Generator)</h2>
+        <h2 class="modal-title" id="modalAddTitle">Tạo Kênh RSS Mới (Universal Feed Generator)</h2>
         <button class="modal-close" onclick="closeModal('modalAdd')">✕</button>
       </div>
 
       <form id="formAddFeed" onsubmit="handleSaveFeed(event)">
+        <input type="hidden" id="feedOriginalSlug" value="">
         <!-- 1. CHỌN LOẠI NGUỒN CÀO (SCRAPER ENGINE) -->
         <div class="form-group">
           <label class="form-label">Loại nguồn cào (Scraper Engine) *</label>
@@ -1362,7 +1398,7 @@ async def dashboard(request: Request):
           <button type="button" class="btn" onclick="closeModal('modalAdd')">Hủy bỏ</button>
           <button type="submit" id="btnSubmitFeed" class="btn primary">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px; height:15px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-            <span>Lưu &amp; Kích hoạt Feed</span>
+            <span id="btnSubmitFeedText">Lưu &amp; Kích hoạt Feed</span>
           </button>
         </div>
       </form>
@@ -1516,6 +1552,129 @@ async def dashboard(request: Request):
           setTimeout(() => location.reload(), 800);
         }})
         .catch(e => showToast('Lỗi khi xóa: ' + e, true));
+    }}
+
+    function toggleFeedPreview(slug) {{
+      const drawer = document.getElementById('drawerPreview_' + slug);
+      const chevron = document.getElementById('chevronPreview_' + slug);
+      if (!drawer) return;
+      const isHidden = drawer.style.display === 'none' || drawer.style.display === '';
+      if (isHidden) {{
+        drawer.style.display = 'block';
+        if (chevron) chevron.style.transform = 'rotate(180deg)';
+      }} else {{
+        drawer.style.display = 'none';
+        if (chevron) chevron.style.transform = 'rotate(0deg)';
+      }}
+    }}
+
+    function openAddFeedModal() {{
+      const form = document.getElementById('formAddFeed');
+      if (form) form.reset();
+      const origSlug = document.getElementById('feedOriginalSlug');
+      if (origSlug) origSlug.value = '';
+      const slugInput = document.getElementById('feedSlug');
+      if (slugInput) delete slugInput.dataset.manual;
+
+      document.getElementById('feedType').value = 'web';
+      handleTypeChange('web');
+      document.getElementById('feedCookieMode').value = 'none';
+      handleCookieModeChange('none');
+
+      if (document.getElementById('selItem')) document.getElementById('selItem').value = '';
+      if (document.getElementById('selTitle')) document.getElementById('selTitle').value = '';
+      if (document.getElementById('selLink')) document.getElementById('selLink').value = '';
+      if (document.getElementById('selDesc')) document.getElementById('selDesc').value = '';
+      if (document.getElementById('chkUseFlareSolverr')) document.getElementById('chkUseFlareSolverr').checked = false;
+      if (document.getElementById('chkSaveToVault')) document.getElementById('chkSaveToVault').checked = false;
+      if (document.getElementById('wrapProfileName')) document.getElementById('wrapProfileName').style.display = 'none';
+
+      const title = document.getElementById('modalAddTitle');
+      if (title) title.innerText = 'Tạo Kênh RSS Mới (Universal Feed Generator)';
+      const btnText = document.getElementById('btnSubmitFeedText');
+      if (btnText) btnText.innerText = 'Lưu & Kích hoạt Feed';
+
+      populateProfileDropdown();
+      openModal('modalAdd');
+    }}
+
+    function editFeedModal(slug) {{
+      fetch('/api/feeds/' + slug)
+        .then(r => {{
+          if (!r.ok) throw new Error('Không thể tải thông tin kênh feed');
+          return r.json();
+        }})
+        .then(f => {{
+          const form = document.getElementById('formAddFeed');
+          if (form) form.reset();
+
+          const origSlug = document.getElementById('feedOriginalSlug');
+          if (origSlug) origSlug.value = f.slug;
+
+          document.getElementById('feedType').value = f.type || 'web';
+          handleTypeChange(f.type || 'web');
+
+          document.getElementById('feedTarget').value = f.target || '';
+          document.getElementById('feedTitle').value = f.title || '';
+
+          const slugInput = document.getElementById('feedSlug');
+          slugInput.value = f.slug;
+          slugInput.dataset.manual = "true";
+
+          document.getElementById('feedCategory').value = f.category || '';
+          document.getElementById('feedDesc').value = f.description || '';
+
+          if (f.selectors) {{
+            if (document.getElementById('selItem')) document.getElementById('selItem').value = f.selectors.item_selector || '';
+            if (document.getElementById('selTitle')) document.getElementById('selTitle').value = f.selectors.title_selector || '';
+            if (document.getElementById('selLink')) document.getElementById('selLink').value = f.selectors.link_selector || '';
+            if (document.getElementById('selDesc')) document.getElementById('selDesc').value = f.selectors.desc_selector || '';
+          }} else {{
+            if (document.getElementById('selItem')) document.getElementById('selItem').value = '';
+            if (document.getElementById('selTitle')) document.getElementById('selTitle').value = '';
+            if (document.getElementById('selLink')) document.getElementById('selLink').value = '';
+            if (document.getElementById('selDesc')) document.getElementById('selDesc').value = '';
+          }}
+
+          if (document.getElementById('chkUseFlareSolverr')) {{
+            document.getElementById('chkUseFlareSolverr').checked = Boolean(f.use_flaresolverr);
+          }}
+
+          const cookieMode = f.cookie_mode || 'none';
+          document.getElementById('feedCookieMode').value = cookieMode;
+          handleCookieModeChange(cookieMode);
+
+          // Populate cookie profiles and select f.cookie_profile
+          fetch('/api/cookies')
+            .then(r => r.json())
+            .then(profiles => {{
+              const sel = document.getElementById('feedCookieProfile');
+              sel.innerHTML = '';
+              if (!profiles || profiles.length === 0) {{
+                sel.innerHTML = '<option value="">(Chưa có bộ cookie nào trong kho - Bấm "Quản lý Kho Cookie" để thêm)</option>';
+              }} else {{
+                profiles.forEach(p => {{
+                  const opt = document.createElement('option');
+                  opt.value = p.id;
+                  opt.innerText = '[' + (p.website || 'web') + '] ' + p.name + ' (' + p.masked + ')';
+                  if (p.id === f.cookie_profile) opt.selected = true;
+                  sel.appendChild(opt);
+                }});
+              }}
+            }});
+
+          document.getElementById('feedCookieCustom').value = f.cookie || '';
+          if (document.getElementById('chkSaveToVault')) document.getElementById('chkSaveToVault').checked = false;
+          if (document.getElementById('wrapProfileName')) document.getElementById('wrapProfileName').style.display = 'none';
+
+          const title = document.getElementById('modalAddTitle');
+          if (title) title.innerText = 'Chỉnh sửa Cấu hình Kênh: ' + (f.title || f.slug);
+          const btnText = document.getElementById('btnSubmitFeedText');
+          if (btnText) btnText.innerText = 'Cập nhật Cấu hình';
+
+          openModal('modalAdd');
+        }})
+        .catch(err => showToast('Lỗi: ' + err, true));
     }}
 
     function openModal(id) {{
@@ -1801,7 +1960,9 @@ async def dashboard(request: Request):
         }};
       }}
 
+      const originalSlug = document.getElementById('feedOriginalSlug') ? document.getElementById('feedOriginalSlug').value.trim() : '';
       const payload = {{
+        original_slug: originalSlug,
         title: document.getElementById('feedTitle').value.trim(),
         slug: document.getElementById('feedSlug').value.trim(),
         type: document.getElementById('feedType').value,
@@ -1828,14 +1989,15 @@ async def dashboard(request: Request):
         return r.json();
       }})
       .then(d => {{
-        showToast('Đã lưu thành công kênh feed [' + d.slug + ']!');
+        const isEdit = Boolean(originalSlug);
+        showToast(isEdit ? ('Đã cập nhật kênh feed [' + d.slug + ']!') : ('Đã lưu thành công kênh feed [' + d.slug + ']!'));
         closeModal('modalAdd');
-        setTimeout(() => location.reload(), 1000);
+        setTimeout(() => location.reload(), 800);
       }})
       .catch(err => {{
         showToast('Lỗi: ' + err, true);
         btn.disabled = false;
-        btn.innerHTML = 'Lưu & Kích hoạt Feed';
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px; height:15px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span id="btnSubmitFeedText">' + (originalSlug ? 'Cập nhật Cấu hình' : 'Lưu &amp; Kích hoạt Feed') + '</span>';
       }});
     }}
 
