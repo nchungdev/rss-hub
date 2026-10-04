@@ -1,9 +1,9 @@
 import html
 from datetime import datetime, timezone
 
-def generate_atom_xml(tag: str, posts: list, base_url: str = "https://rss.data1box.win") -> str:
-    feed_title = f"Threads - #{tag} (Cộng đồng Book Threads)"
-    feed_link = f"https://www.threads.com/search?q={tag}&amp;serp_type=tags"
+def generate_atom_xml(tag: str, posts: list, base_url: str = "https://rss.data1box.win", feed_meta: dict = None) -> str:
+    feed_title = (feed_meta or {}).get("title") or f"Feed - #{tag}"
+    feed_link = (feed_meta or {}).get("site_url") or f"https://www.threads.com/search?q={tag}&amp;serp_type=tags"
     feed_self = f"{base_url}/{tag}.atom"
     now_iso = datetime.now(timezone.utc).isoformat()
 

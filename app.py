@@ -2,11 +2,18 @@ import os
 import asyncio
 import logging
 from typing import Optional
+from datetime import datetime, timezone
 import httpx
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from scrapers.threads import get_or_update_feed
+from scrapers.feed_manager import (
+    load_feeds, 
+    save_feeds, 
+    get_feed_posts, 
+    sanitize_slug, 
+    DATA_DIR
+)
 from formatters.rss import generate_rss_xml
 from formatters.json_feed import generate_json_feed
 from formatters.atom import generate_atom_xml
@@ -21,22 +28,13 @@ BASE_URL = os.getenv("BASE_URL", "https://rss.data1box.win")
 CLARAOS_URL = os.getenv("CLARAOS_URL", "https://data1box.win")
 SCRAPE_INTERVAL_MINUTES = int(os.getenv("SCRAPE_INTERVAL_MINUTES", "30"))
 
-CUSTOM_FEEDS = {
-    "bookthreads": {
-        "title": "Book Threads (Cộng đồng Sách)",
-        "category": "Cộng đồng & Sách",
-        "description": "Các bài chia sẻ sách, review và link Ebook Google Drive từ cộng đồng Book Threads Việt Nam.",
-        "icon": "book",
-        "accent": "cyan"
-    }
-}
-
 async def background_scheduler():
     while True:
         try:
-            logger.info("Running periodic scrape for custom feeds...")
-            for tag in list(CUSTOM_FEEDS.keys()):
-                await asyncio.to_thread(get_or_update_feed, tag, True)
+            feeds = load_feeds()
+            logger.info(f"Running periodic scrape for {len(feeds)} feeds...")
+            for slug, meta in feeds.items():
+                await asyncio.to_thread(get_feed_posts, slug, True)
         except Exception as e:
             logger.error(f"Scheduler error: {e}")
         await asyncio.sleep(SCRAPE_INTERVAL_MINUTES * 60)
@@ -49,33 +47,95 @@ async def startup_event():
 def health_check():
     return {"status": "ok", "service": "claraos-rss-hub"}
 
+@app.get("/api/feeds")
+def api_get_feeds():
+    return load_feeds()
+
+@app.post("/api/feeds")
+async def api_create_or_update_feed(request: Request):
+    data = await request.json()
+    raw_slug = data.get("slug", "")
+    slug = sanitize_slug(raw_slug)
+    if not slug:
+        raise HTTPException(status_code=400, detail="Định danh slug không hợp lệ (chỉ chấp nhận chữ cái, số, gạch ngang)")
+    
+    title = data.get("title", "").strip() or slug
+    feed_type = data.get("type", "threads")
+    target = data.get("target", "").strip() or slug
+    category = data.get("category", "Chung").strip() or "Chung"
+    description = data.get("description", "").strip()
+
+    feeds = load_feeds()
+    feeds[slug] = {
+        "slug": slug,
+        "title": title,
+        "type": feed_type,
+        "target": target,
+        "category": category,
+        "description": description,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    save_feeds(feeds)
+    
+    # Trigger initial scrape in background
+    asyncio.create_task(asyncio.to_thread(get_feed_posts, slug, True))
+    return {"status": "ok", "slug": slug}
+
+@app.delete("/api/feeds/{slug}")
+def api_delete_feed(slug: str):
+    clean_slug = sanitize_slug(slug)
+    feeds = load_feeds()
+    if clean_slug in feeds:
+        del feeds[clean_slug]
+        save_feeds(feeds)
+        # Delete cache if present
+        cache_file = os.path.join(DATA_DIR, f"history_{clean_slug}.json")
+        if os.path.exists(cache_file):
+            try:
+                os.remove(cache_file)
+            except Exception:
+                pass
+        return {"status": "ok", "slug": clean_slug}
+    raise HTTPException(status_code=404, detail="Kênh feed không tồn tại")
+
 @app.get("/api/refresh/{tag}")
 async def refresh_feed(tag: str):
-    clean_tag = tag.lstrip("#").strip().lower()
-    posts = await asyncio.to_thread(get_or_update_feed, clean_tag, True)
+    clean_tag = sanitize_slug(tag.lstrip("#"))
+    posts = await asyncio.to_thread(get_feed_posts, clean_tag, True)
     return {"status": "ok", "tag": clean_tag, "count": len(posts)}
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
+    feeds = load_feeds()
     feed_cards = ""
     total_posts = 0
+    categories = set()
 
-    for tag, meta in CUSTOM_FEEDS.items():
-        posts = await asyncio.to_thread(get_or_update_feed, tag, False)
+    for slug, meta in feeds.items():
+        cat = meta.get("category", "Chung")
+        categories.add(cat)
+        posts = await asyncio.to_thread(get_feed_posts, slug, False)
+        if not isinstance(posts, list):
+            posts = list(posts.values()) if isinstance(posts, dict) else []
         count = len(posts)
         total_posts += count
         
+        feed_type = meta.get("type", "threads")
+        type_badge = "THREADS"
+        if feed_type == "rsshub": type_badge = "RSSHUB"
+        elif feed_type == "custom_rss": type_badge = "EXTERNAL RSS"
+
         # Recent items preview
         preview_items_html = ""
-        for p in posts[:4]:
+        for p in posts[:3]:
             user = p.get("username", "user")
             raw_text = p.get("text", "").strip()
-            first_line = raw_text.split("\n")[0][:110] if raw_text else "Bài viết không có nội dung văn bản"
+            first_line = raw_text.split("\n")[0][:110] if raw_text else "Bài viết không có tiêu đề"
             gdrive = p.get("gdrive_links", [])
             badge = '<span class="badge cyan" style="padding: 2px 8px; font-size: 0.68rem;"><span class="dot"></span> Ebook Drive</span>' if gdrive else ""
             
             preview_items_html += f"""
-            <div style="background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 4px; transition: border-color 0.2s ease;">
+            <div style="background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 4px;">
                 <div style="display: flex; align-items: center; justify-content: space-between;">
                     <span style="font-weight: 600; font-size: 0.75rem; color: #38bdf8;">@{user}</span>
                     {badge}
@@ -87,7 +147,7 @@ async def dashboard(request: Request):
             """
 
         feed_cards += f"""
-        <div class="task-card">
+        <div class="task-card feed-item" data-category="{cat}">
             <div class="task-card-head">
                 <div style="display: flex; align-items: center; gap: 14px;">
                     <div class="brand-icon" style="background: linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(99, 102, 241, 0.25)); border: 1px solid rgba(14, 165, 233, 0.3);">
@@ -97,7 +157,10 @@ async def dashboard(request: Request):
                         </svg>
                     </div>
                     <div>
-                        <div style="font-size: 0.7rem; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.05em;">{meta['category']}</div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 0.68rem; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.05em;">{cat}</span>
+                            <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.06); color: var(--text-dim); border: 1px solid var(--card-border);">{type_badge}</span>
+                        </div>
                         <div class="task-title" style="margin-top: 2px;">{meta['title']}</div>
                     </div>
                 </div>
@@ -109,7 +172,7 @@ async def dashboard(request: Request):
             </div>
 
             <div style="color: var(--text-muted); font-size: 0.8rem; line-height: 1.5; margin: 4px 0 8px 0;">
-                {meta['description']}
+                {meta.get('description', '')}
             </div>
 
             <!-- Feed URL Rows -->
@@ -117,8 +180,12 @@ async def dashboard(request: Request):
                 <!-- RSS 2.0 -->
                 <div style="display: flex; align-items: center; gap: 8px; background: rgba(7, 12, 24, 0.8); border: 1px solid var(--card-border); border-radius: 12px; padding: 6px 10px;">
                     <span style="font-size: 0.7rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: rgba(245, 158, 11, 0.12); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); text-align: center; width: 62px;">RSS 2.0</span>
-                    <input type="text" readonly value="{BASE_URL}/{tag}.xml" style="background: transparent; border: none; outline: none; color: #cbd5e1; font-family: var(--mono); font-size: 0.78rem; flex: 1; min-width: 0;" />
-                    <button class="btn" onclick="copyLink('{BASE_URL}/{tag}.xml', this)" style="height: 30px; padding: 0 10px; font-size: 0.74rem;">
+                    <input type="text" readonly value="{BASE_URL}/{slug}.xml" style="background: transparent; border: none; outline: none; color: #cbd5e1; font-family: var(--mono); font-size: 0.78rem; flex: 1; min-width: 0;" />
+                    <a href="{BASE_URL}/{slug}.xml" target="_blank" class="btn" style="height: 30px; padding: 0 10px; font-size: 0.74rem;" title="Mở trong tab mới">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        <span>Mở</span>
+                    </a>
+                    <button class="btn" onclick="copyLink('{BASE_URL}/{slug}.xml', this)" style="height: 30px; padding: 0 10px; font-size: 0.74rem;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
                         <span>Sao chép</span>
                     </button>
@@ -127,8 +194,12 @@ async def dashboard(request: Request):
                 <!-- JSON Feed -->
                 <div style="display: flex; align-items: center; gap: 8px; background: rgba(7, 12, 24, 0.8); border: 1px solid var(--card-border); border-radius: 12px; padding: 6px 10px;">
                     <span style="font-size: 0.7rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3); text-align: center; width: 62px;">JSON</span>
-                    <input type="text" readonly value="{BASE_URL}/{tag}.json" style="background: transparent; border: none; outline: none; color: #cbd5e1; font-family: var(--mono); font-size: 0.78rem; flex: 1; min-width: 0;" />
-                    <button class="btn" onclick="copyLink('{BASE_URL}/{tag}.json', this)" style="height: 30px; padding: 0 10px; font-size: 0.74rem;">
+                    <input type="text" readonly value="{BASE_URL}/{slug}.json" style="background: transparent; border: none; outline: none; color: #cbd5e1; font-family: var(--mono); font-size: 0.78rem; flex: 1; min-width: 0;" />
+                    <a href="{BASE_URL}/{slug}.json" target="_blank" class="btn" style="height: 30px; padding: 0 10px; font-size: 0.74rem;" title="Mở trong tab mới">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        <span>Mở</span>
+                    </a>
+                    <button class="btn" onclick="copyLink('{BASE_URL}/{slug}.json', this)" style="height: 30px; padding: 0 10px; font-size: 0.74rem;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
                         <span>Sao chép</span>
                     </button>
@@ -137,8 +208,12 @@ async def dashboard(request: Request):
                 <!-- ATOM Feed -->
                 <div style="display: flex; align-items: center; gap: 8px; background: rgba(7, 12, 24, 0.8); border: 1px solid var(--card-border); border-radius: 12px; padding: 6px 10px;">
                     <span style="font-size: 0.7rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: rgba(139, 92, 246, 0.12); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.3); text-align: center; width: 62px;">ATOM</span>
-                    <input type="text" readonly value="{BASE_URL}/{tag}.atom" style="background: transparent; border: none; outline: none; color: #cbd5e1; font-family: var(--mono); font-size: 0.78rem; flex: 1; min-width: 0;" />
-                    <button class="btn" onclick="copyLink('{BASE_URL}/{tag}.atom', this)" style="height: 30px; padding: 0 10px; font-size: 0.74rem;">
+                    <input type="text" readonly value="{BASE_URL}/{slug}.atom" style="background: transparent; border: none; outline: none; color: #cbd5e1; font-family: var(--mono); font-size: 0.78rem; flex: 1; min-width: 0;" />
+                    <a href="{BASE_URL}/{slug}.atom" target="_blank" class="btn" style="height: 30px; padding: 0 10px; font-size: 0.74rem;" title="Mở trong tab mới">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        <span>Mở</span>
+                    </a>
+                    <button class="btn" onclick="copyLink('{BASE_URL}/{slug}.atom', this)" style="height: 30px; padding: 0 10px; font-size: 0.74rem;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
                         <span>Sao chép</span>
                     </button>
@@ -146,13 +221,13 @@ async def dashboard(request: Request):
             </div>
 
             <!-- Recent Items Box -->
-            <div style="margin-top: 10px;">
+            <div style="margin-top: 6px;">
                 <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                     <span>Bài viết vừa cào gần đây</span>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr; gap: 8px;">
-                    {preview_items_html}
+                    {preview_items_html if preview_items_html else '<div style="color:var(--text-dim); font-size:0.75rem; font-style:italic;">Chưa có dữ liệu bài viết (bấm cào mới ngay bên dưới).</div>'}
                 </div>
             </div>
 
@@ -160,17 +235,27 @@ async def dashboard(request: Request):
             <div class="task-card-footer" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--card-border);">
                 <div style="display: flex; align-items: center; gap: 8px; font-size: 0.74rem; color: var(--text-dim);">
                     <span class="dot" style="background: #0ea5e9;"></span>
-                    <span>Tự động quét mỗi {SCRAPE_INTERVAL_MINUTES} phút &bull; Tương thích Miniflux, Feedly, Telegram</span>
+                    <span>Nguồn: <strong style="color:var(--text); font-family:var(--mono);">{meta.get('target', slug)}</strong></span>
                 </div>
                 <div class="task-actions-row">
-                    <button class="btn primary" onclick="refreshFeed('{tag}', this)">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 15px; height: 15px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                    <button class="btn danger" onclick="deleteFeed('{slug}')" title="Xóa kênh Feed này" style="height: 32px; padding: 0 10px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        <span>Xóa</span>
+                    </button>
+                    <button class="btn primary" onclick="refreshFeed('{slug}', this)" style="height: 32px; padding: 0 12px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
                         <span>Cào mới ngay</span>
                     </button>
                 </div>
             </div>
         </div>
         """
+
+    # Category pills
+    cat_pills = f'<button class="pill active" onclick="filterFeeds(\'all\', this)"><span>Tất cả Feeds</span><span class="pill-count">{len(feeds)}</span></button>'
+    for c in sorted(categories):
+        count_c = sum(1 for m in feeds.values() if m.get("category", "Chung") == c)
+        cat_pills += f'<button class="pill" onclick="filterFeeds(\'{c}\', this)"><span>{c}</span><span class="pill-count">{count_c}</span></button>'
 
     html_content = f"""<!DOCTYPE html>
 <html lang="vi">
@@ -222,7 +307,7 @@ async def dashboard(request: Request):
     ::-webkit-scrollbar-thumb {{ background: rgba(255,255,255,0.15); border-radius: 4px; }}
     ::-webkit-scrollbar-thumb:hover {{ background: rgba(255,255,255,0.3); }}
 
-    /* ClaraOS Sidebar */
+    /* Sidebar */
     .torbox-sidebar {{
       width: var(--sidebar-w);
       min-width: var(--sidebar-w);
@@ -298,6 +383,11 @@ async def dashboard(request: Request):
       font-weight: 500;
       text-decoration: none;
       transition: all 0.15s ease;
+      cursor: pointer;
+      background: transparent;
+      border: none;
+      text-align: left;
+      width: 100%;
     }}
     .nav-item:hover {{
       background: rgba(255, 255, 255, 0.06);
@@ -426,6 +516,16 @@ async def dashboard(request: Request):
       background: linear-gradient(135deg, #38bdf8, #0ea5e9);
       box-shadow: 0 6px 20px rgba(14, 165, 233, 0.45);
     }}
+    .btn.danger {{
+      background: rgba(244, 63, 94, 0.12);
+      border-color: rgba(244, 63, 94, 0.3);
+      color: #fb7185;
+    }}
+    .btn.danger:hover {{
+      background: rgba(244, 63, 94, 0.25);
+      border-color: rgba(244, 63, 94, 0.6);
+      color: #fff;
+    }}
 
     /* Stats Grid */
     .stats-grid {{
@@ -483,7 +583,7 @@ async def dashboard(request: Request):
       color: var(--text-dim);
     }}
 
-    /* Controls Bar & Filter Pills (Standardized Suite Template) */
+    /* Controls Bar & Filter Pills */
     .controls-bar {{
       background: rgba(15, 23, 42, 0.65);
       border: 1px solid var(--card-border);
@@ -587,6 +687,81 @@ async def dashboard(request: Request):
       display: flex;
       align-items: center;
       gap: 8px;
+    }}
+
+    /* Modal Form (Debrid Standard) */
+    .modal-overlay {{
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }}
+    .modal-overlay.open {{ opacity: 1; pointer-events: auto; }}
+    .modal-card {{
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      width: min(580px, 100%);
+      max-height: 90vh;
+      overflow-y: auto;
+      padding: 26px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+    }}
+    .modal-head {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--card-border);
+    }}
+    .modal-title {{ font-size: 1.18rem; font-weight: 700; color: white; }}
+    .modal-close {{
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 1.3rem;
+      padding: 4px;
+    }}
+    .form-group {{ margin-bottom: 16px; }}
+    .form-label {{
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }}
+    .form-input, .form-select, .form-textarea {{
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: 10px;
+      background: rgba(7, 12, 24, 0.85);
+      border: 1px solid var(--card-border);
+      color: #fff;
+      font-family: var(--font);
+      font-size: 0.85rem;
+      outline: none;
+      transition: border-color 0.2s ease;
+      box-sizing: border-box;
+    }}
+    .form-input:focus, .form-select:focus, .form-textarea:focus {{
+      border-color: #0ea5e9;
+      box-shadow: 0 0 10px rgba(14, 165, 233, 0.25);
+    }}
+    .form-hint {{
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      margin-top: 5px;
+      line-height: 1.4;
     }}
 
     /* Floating Dock Footer */
@@ -768,14 +943,14 @@ async def dashboard(request: Request):
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/></svg>
         <span>Danh sách Feeds</span>
       </a>
-      <a href="#bookthreads" class="nav-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-        <span>Sách &amp; Ebooks</span>
-      </a>
-      <a href="javascript:void(0)" onclick="refreshFeed('bookthreads', document.getElementById('btnRefreshAll'))" class="nav-item">
+      <button class="nav-item" onclick="openModal('modalAdd')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <span>Thêm kênh mới</span>
+      </button>
+      <button class="nav-item" onclick="refreshAllFeeds()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-        <span>Cào mới tức thì</span>
-      </a>
+        <span>Cào mới tất cả</span>
+      </button>
     </nav>
 
     <!-- Sidebar Telemetry Badges -->
@@ -796,18 +971,18 @@ async def dashboard(request: Request):
     <header class="topbar-header">
       <div style="display: flex; align-items: center; gap: 14px; min-width: 0;">
         <button class="hamburger-btn" onclick="toggleSidebar(true)">☰</button>
-        <h1 class="page-title">Kênh Feed &amp; Tự Động Hóa</h1>
+        <h1 class="page-title">Quản lý Feeds &amp; Cấu hình Nguồn</h1>
       </div>
 
       <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
-        <button id="btnRefreshAll" class="btn primary" onclick="refreshFeed('bookthreads', this)">
+        <button class="btn primary" onclick="openModal('modalAdd')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span>Thêm kênh Feed</span>
+        </button>
+        <button id="btnRefreshTop" class="btn" onclick="refreshAllFeeds()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
           <span>Làm mới tất cả</span>
         </button>
-        <a class="btn" href="{CLARAOS_URL}" target="_blank" title="Về ClaraOS Portal">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-          <span>ClaraOS</span>
-        </a>
       </div>
     </header>
 
@@ -820,8 +995,8 @@ async def dashboard(request: Request):
           </div>
           <div class="stat-info">
             <div class="label">Tổng số Feed</div>
-            <div class="val">1 Kênh</div>
-            <div class="desc">Threads &amp; Ebooks VN</div>
+            <div class="val">{len(feeds)} Kênh</div>
+            <div class="desc">Threads, RSSHub, URLs</div>
           </div>
         </div>
 
@@ -832,7 +1007,7 @@ async def dashboard(request: Request):
           <div class="stat-info">
             <div class="label">Bài viết đã cào</div>
             <div class="val">{total_posts} Bài</div>
-            <div class="desc">Phân loại Ebook Drive</div>
+            <div class="desc">Tự động phân loại Ebook</div>
           </div>
         </div>
 
@@ -843,7 +1018,7 @@ async def dashboard(request: Request):
           <div class="stat-info">
             <div class="label">Chu kỳ quét</div>
             <div class="val">{SCRAPE_INTERVAL_MINUTES} Phút</div>
-            <div class="desc">Tự động chạy ngầm</div>
+            <div class="desc">Background Daemon</div>
           </div>
         </div>
 
@@ -859,27 +1034,16 @@ async def dashboard(request: Request):
         </div>
       </div>
 
-      <!-- Controls Bar & Filter Pills (Standardized Suite Template) -->
+      <!-- Controls Bar & Filter Pills -->
       <div class="controls-bar">
         <div class="filter-pills">
-          <button class="pill active" onclick="filterFeeds('all', this)">
-            <span>Tất cả Feeds</span>
-            <span class="pill-count">1</span>
-          </button>
-          <button class="pill" onclick="filterFeeds('books', this)">
-            <span>Sách &amp; Ebooks</span>
-            <span class="pill-count">1</span>
-          </button>
-          <button class="pill" onclick="filterFeeds('threads', this)">
-            <span>Threads VN</span>
-            <span class="pill-count">1</span>
-          </button>
+          {cat_pills}
         </div>
 
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-          <button class="btn" onclick="copyLink('{BASE_URL}/bookthreads.xml', this)" title="Sao chép link RSS 2.0 nhanh">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-            <span>Sao chép RSS URL</span>
+          <button class="btn primary" onclick="openModal('modalAdd')" title="Thêm nguồn RSS mới">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>Thêm kênh mới</span>
           </button>
           <button class="btn" onclick="location.reload()" title="Làm mới trang">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
@@ -889,7 +1053,7 @@ async def dashboard(request: Request):
 
       <!-- Task / Feeds List -->
       <div id="viewFeeds" class="task-list">
-        {feed_cards}
+        {feed_cards if feed_cards else '<div style="text-align:center; padding:40px; color:var(--text-dim);">Chưa có kênh feed nào. Bấm "+ Thêm kênh Feed" để bắt đầu!</div>'}
       </div>
 
       <!-- Quick Ecosystem Guide Box -->
@@ -899,21 +1063,21 @@ async def dashboard(request: Request):
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
           </div>
           <div style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.6;">
-            <div style="font-size: 0.92rem; font-weight: 700; color: #fff; margin-bottom: 4px;">Hướng dẫn tích hợp ClaraOS RSS Engine</div>
-            <div>&bull; <strong>Dành cho app đọc tin (Feedly, NetNewsWire, Miniflux):</strong> Dùng URL định dạng <code style="font-family: var(--mono); color: #fbbf24; background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 6px;">.xml</code> hoặc <code style="font-family: var(--mono); color: #c084fc; background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 6px;">.atom</code>.</div>
-            <div>&bull; <strong>Dành cho Automation (n8n, Bot Telegram, Cron Script):</strong> Dùng URL định dạng <code style="font-family: var(--mono); color: #38bdf8; background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 6px;">.json</code> (chuẩn JSON Feed v1.1 RFC).</div>
-            <div>&bull; <strong>Bộ lọc Ebook thông minh:</strong> Tự động phân tích metadata, phát hiện link Google Drive và tệp sách .epub / .pdf kèm badge nhận diện.</div>
+            <div style="font-size: 0.92rem; font-weight: 700; color: #fff; margin-bottom: 4px;">Khả năng cấu hình &amp; Kết nối đa nguồn của ClaraOS RSS Hub</div>
+            <div>&bull; <strong>Threads Social Scraper:</strong> Nhập bất kỳ thẻ hashtag hoặc từ khóa (ví dụ: <code style="font-family:var(--mono); color:#38bdf8;">congnghe</code>, <code style="font-family:var(--mono); color:#38bdf8;">reviewphim</code>, <code style="font-family:var(--mono); color:#38bdf8;">sachhay</code>) để tự động cào bài viết qua FlareSolverr.</div>
+            <div>&bull; <strong>RSSHub Engine (Hàng ngàn nguồn có sẵn):</strong> Hỗ trợ trực tiếp các route RSSHub (ví dụ: <code style="font-family:var(--mono); color:#c084fc;">telegram/channel/duongdancity</code>, <code style="font-family:var(--mono); color:#c084fc;">bilibili/ranking/0/3</code>, <code style="font-family:var(--mono); color:#c084fc;">youtube/user/...</code>).</div>
+            <div>&bull; <strong>URL RSS Ngoài:</strong> Nhập URL RSS của bất kỳ báo chí/blog nào (ví dụ: <code style="font-family:var(--mono); color:#fbbf24;">https://vnexpress.net/rss/tin-moi-nhat.rss</code>) để đồng bộ và chuyển đổi sang JSON Feed v1.1 &amp; Atom 1.0.</div>
           </div>
         </div>
       </div>
     </main>
 
-    <!-- Floating Dock Footer (Standardized Suite Template) -->
+    <!-- Floating Dock Footer -->
     <div class="content-footer">
       <div class="footer-stats-strip">
         <div class="footer-stat-chip chip-cyan">
           <span class="chip-label">Kênh:</span>
-          <span class="chip-val">1 Active</span>
+          <span class="chip-val">{len(feeds)} Feeds</span>
         </div>
         <div class="footer-stat-chip chip-emerald">
           <span class="chip-label">Bài viết:</span>
@@ -928,6 +1092,66 @@ async def dashboard(request: Request):
           <span class="chip-val">rss.data1box.win</span>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD / CONFIGURE FEED -->
+  <div id="modalAdd" class="modal-overlay" onclick="handleModalClick(event, 'modalAdd')">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2 class="modal-title">Cấu hình Kênh RSS Mới</h2>
+        <button class="modal-close" onclick="closeModal('modalAdd')">✕</button>
+      </div>
+
+      <form id="formAddFeed" onsubmit="handleSaveFeed(event)">
+        <div class="form-group">
+          <label class="form-label">Tên hiển thị kênh (Title) *</label>
+          <input type="text" id="feedTitle" class="form-input" required placeholder="Ví dụ: Tin tức Công nghệ Threads, VnExpress Mới, ..." oninput="autoGenerateSlug(this.value)">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Định danh URL (Slug) *</label>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:0.75rem; color:var(--text-dim); font-family:var(--mono);">{BASE_URL}/</span>
+            <input type="text" id="feedSlug" class="form-input" required placeholder="congnghe" style="font-family:var(--mono);">
+            <span style="font-size:0.75rem; color:var(--text-dim); font-family:var(--mono);">.xml / .json</span>
+          </div>
+          <div class="form-hint">Chỉ gồm chữ cái viết thường không dấu, số và gạch ngang (a-z, 0-9, -).</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Loại nguồn cào (Source Type) *</label>
+          <select id="feedType" class="form-select" onchange="handleTypeChange(this.value)">
+            <option value="threads">Threads.net (Hashtag hoặc từ khóa)</option>
+            <option value="rsshub">RSSHub Upstream Route (Hệ thống RSSHub)</option>
+            <option value="custom_rss">URL RSS / Atom ngoài (Website, Báo chí, Blog)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" id="lblTarget">Từ khóa Hashtag trên Threads *</label>
+          <input type="text" id="feedTarget" class="form-input" required placeholder="vd: congnghe, reviewphim, kinhte, manga">
+          <div class="form-hint" id="hintTarget">Nhập hashtag hoặc từ khóa cần tìm kiếm và tạo RSS trên mạng xã hội Threads.</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Thể loại / Chuyên mục (Category)</label>
+          <input type="text" id="feedCategory" class="form-input" placeholder="vd: Công nghệ, Tin tức, Sách &amp; Ebooks, Giải trí">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Mô tả ngắn</label>
+          <textarea id="feedDesc" class="form-textarea" rows="2" placeholder="Mô tả nội dung kênh feed này..."></textarea>
+        </div>
+
+        <div style="display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:24px; padding-top:16px; border-top:1px solid var(--card-border);">
+          <button type="button" class="btn" onclick="closeModal('modalAdd')">Hủy bỏ</button>
+          <button type="submit" id="btnSubmitFeed" class="btn primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px; height:15px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            <span>Lưu &amp; Kích hoạt Feed</span>
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -964,28 +1188,137 @@ async def dashboard(request: Request):
       }});
     }}
 
-    function refreshFeed(tag, btn) {{
+    function refreshFeed(slug, btn) {{
       if (btn) {{
         btn.dataset.origHtml = btn.innerHTML;
-        btn.innerHTML = '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 15px; height: 15px; animation: spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>Đang cào...</span>';
+        btn.innerHTML = '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; animation: spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>Đang cào...</span>';
         btn.disabled = true;
       }}
-      fetch('/api/refresh/' + tag)
+      fetch('/api/refresh/' + slug)
         .then(r => r.json())
         .then(d => {{
           showToast('Đã cào mới thành công: ' + d.count + ' bài viết');
-          if (btn) {{
-            btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 15px; height: 15px; color: #34d399;"><polyline points="20 6 9 17 4 12"/></svg><span>Xong (' + d.count + ')</span>';
-          }}
           setTimeout(() => location.reload(), 1000);
         }})
         .catch(e => {{
-          showToast('Lỗi khi cào dữ liệu: ' + e, true);
+          showToast('Lỗi khi cào: ' + e, true);
           if (btn && btn.dataset.origHtml) {{
             btn.innerHTML = btn.dataset.origHtml;
             btn.disabled = false;
           }}
         }});
+    }}
+
+    function refreshAllFeeds() {{
+      const btn = document.getElementById('btnRefreshTop');
+      if (btn) btn.innerHTML = '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 15px; height: 15px; animation: spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>Đang làm mới...</span>';
+      fetch('/api/feeds')
+        .then(r => r.json())
+        .then(async feeds => {{
+          const keys = Object.keys(feeds);
+          for (let k of keys) {{
+            await fetch('/api/refresh/' + k);
+          }}
+          showToast('Đã hoàn tất làm mới tất cả các kênh');
+          setTimeout(() => location.reload(), 1000);
+        }})
+        .catch(e => showToast('Lỗi: ' + e, true));
+    }}
+
+    function deleteFeed(slug) {{
+      if (!confirm('Bạn có chắc chắn muốn xóa kênh feed [' + slug + '] không?')) return;
+      fetch('/api/feeds/' + slug, {{ method: 'DELETE' }})
+        .then(r => r.json())
+        .then(d => {{
+          showToast('Đã xóa thành công kênh feed [' + slug + ']');
+          setTimeout(() => location.reload(), 800);
+        }})
+        .catch(e => showToast('Lỗi khi xóa: ' + e, true));
+    }}
+
+    function openModal(id) {{
+      const m = document.getElementById(id);
+      if (m) m.classList.add('open');
+    }}
+
+    function closeModal(id) {{
+      const m = document.getElementById(id);
+      if (m) m.classList.remove('open');
+    }}
+
+    function handleModalClick(e, id) {{
+      if (e.target.id === id) closeModal(id);
+    }}
+
+    function autoGenerateSlug(title) {{
+      const slugInput = document.getElementById('feedSlug');
+      if (!slugInput.dataset.manual) {{
+        let s = title.toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-z0-9]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '');
+        slugInput.value = s;
+      }}
+    }}
+
+    document.getElementById('feedSlug').addEventListener('input', function() {{
+      this.dataset.manual = "true";
+    }});
+
+    function handleTypeChange(val) {{
+      const lbl = document.getElementById('lblTarget');
+      const hint = document.getElementById('hintTarget');
+      const inp = document.getElementById('feedTarget');
+      if (val === 'threads') {{
+        lbl.innerText = 'Từ khóa / Hashtag Threads *';
+        inp.placeholder = 'vd: congnghe, reviewphim, kinhte, manga';
+        hint.innerText = 'Nhập hashtag hoặc từ khóa cần cào và lọc link Ebook trên Threads.';
+      }} else if (val === 'rsshub') {{
+        lbl.innerText = 'Route RSSHub Upstream *';
+        inp.placeholder = 'vd: telegram/channel/duongdancity, bilibili/ranking/0/3';
+        hint.innerText = 'Nhập đường dẫn route được hỗ trợ bởi hệ thống RSSHub.';
+      }} else if (val === 'custom_rss') {{
+        lbl.innerText = 'Đường dẫn URL RSS / Atom ngoài *';
+        inp.placeholder = 'vd: https://vnexpress.net/rss/tin-moi-nhat.rss';
+        hint.innerText = 'Nhập địa chỉ URL RSS/Atom của bất kỳ website hoặc báo chí nào.';
+      }}
+    }}
+
+    function handleSaveFeed(e) {{
+      e.preventDefault();
+      const btn = document.getElementById('btnSubmitFeed');
+      btn.disabled = true;
+      btn.innerHTML = '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px; animation:spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>Đang lưu...</span>';
+
+      const payload = {{
+        title: document.getElementById('feedTitle').value.trim(),
+        slug: document.getElementById('feedSlug').value.trim(),
+        type: document.getElementById('feedType').value,
+        target: document.getElementById('feedTarget').value.trim(),
+        category: document.getElementById('feedCategory').value.trim() || 'Chung',
+        description: document.getElementById('feedDesc').value.trim()
+      }};
+
+      fetch('/api/feeds', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify(payload)
+      }})
+      .then(r => {{
+        if (!r.ok) return r.json().then(err => Promise.reject(err.detail || 'Lỗi server'));
+        return r.json();
+      }})
+      .then(d => {{
+        showToast('Đã lưu thành công kênh feed [' + d.slug + ']!');
+        closeModal('modalAdd');
+        setTimeout(() => location.reload(), 1000);
+      }})
+      .catch(err => {{
+        showToast('Lỗi: ' + err, true);
+        btn.disabled = false;
+        btn.innerHTML = 'Lưu & Kích hoạt Feed';
+      }});
     }}
 
     function toggleSidebar(open) {{
@@ -1003,6 +1336,15 @@ async def dashboard(request: Request):
     function filterFeeds(cat, pill) {{
       document.querySelectorAll('.filter-pills .pill').forEach(p => p.classList.remove('active'));
       if (pill) pill.classList.add('active');
+
+      const items = document.querySelectorAll('.feed-item');
+      items.forEach(it => {{
+        if (cat === 'all' || it.dataset.category === cat) {{
+          it.style.display = 'flex';
+        }} else {{
+          it.style.display = 'none';
+        }}
+      }});
     }}
   </script>
   <style>
@@ -1025,16 +1367,18 @@ async def handle_feed_or_proxy(path: str, request: Request):
             ext = extension
             clean_path = base
 
-    if clean_path in CUSTOM_FEEDS or clean_path == "bookthreads":
-        posts = await asyncio.to_thread(get_or_update_feed, clean_path, False)
+    feeds = load_feeds()
+    if clean_path in feeds or clean_path == "bookthreads":
+        meta = feeds.get(clean_path, {})
+        posts = await asyncio.to_thread(get_feed_posts, clean_path, False)
         if ext in ("xml", "rss"):
-            content = generate_rss_xml(clean_path, posts, BASE_URL)
+            content = generate_rss_xml(clean_path, posts, BASE_URL, meta)
             return Response(content=content, media_type="application/rss+xml; charset=utf-8")
         elif ext == "json":
-            data = generate_json_feed(clean_path, posts, BASE_URL)
+            data = generate_json_feed(clean_path, posts, BASE_URL, meta)
             return JSONResponse(content=data, media_type="application/feed+json; charset=utf-8")
         elif ext == "atom":
-            content = generate_atom_xml(clean_path, posts, BASE_URL)
+            content = generate_atom_xml(clean_path, posts, BASE_URL, meta)
             return Response(content=content, media_type="application/atom+xml; charset=utf-8")
 
     upstream_url = f"{RSSHUB_UPSTREAM}/{path}"

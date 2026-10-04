@@ -2,11 +2,11 @@ import html
 from datetime import datetime, timezone
 from email.utils import format_datetime
 
-def generate_rss_xml(tag: str, posts: list, base_url: str = "https://rss.data1box.win") -> str:
-    feed_title = f"Threads - #{tag} (Cộng đồng Book Threads)"
-    feed_link = f"https://www.threads.com/search?q={tag}&amp;serp_type=tags"
+def generate_rss_xml(tag: str, posts: list, base_url: str = "https://rss.data1box.win", feed_meta: dict = None) -> str:
+    feed_title = (feed_meta or {}).get("title") or f"Feed - #{tag}"
+    feed_link = (feed_meta or {}).get("site_url") or f"https://www.threads.com/search?q={tag}&amp;serp_type=tags"
     feed_self = f"{base_url}/{tag}.xml"
-    feed_desc = f"Các bài viết mới nhất trong cộng đồng #{tag} trên Threads"
+    feed_desc = (feed_meta or {}).get("description") or f"Các bài viết mới nhất từ {feed_title}"
     now_rfc822 = format_datetime(datetime.now(timezone.utc))
 
     xml_lines = [

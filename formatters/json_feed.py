@@ -1,11 +1,11 @@
 import json
 from datetime import datetime, timezone
 
-def generate_json_feed(tag: str, posts: list, base_url: str = "https://rss.data1box.win") -> dict:
-    feed_title = f"Threads - #{tag} (Cộng đồng Book Threads)"
-    feed_link = f"https://www.threads.com/search?q={tag}&serp_type=tags"
+def generate_json_feed(tag: str, posts: list, base_url: str = "https://rss.data1box.win", feed_meta: dict = None) -> dict:
+    feed_title = (feed_meta or {}).get("title") or f"Feed - #{tag}"
+    feed_link = (feed_meta or {}).get("site_url") or f"https://www.threads.com/search?q={tag}&serp_type=tags"
     feed_self = f"{base_url}/{tag}.json"
-    feed_desc = f"Các bài viết mới nhất trong cộng đồng #{tag} trên Threads"
+    feed_desc = (feed_meta or {}).get("description") or f"Các bài viết mới nhất từ {feed_title}"
 
     items = []
     for p in posts:
