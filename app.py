@@ -64,6 +64,7 @@ async def api_create_or_update_feed(request: Request):
     target = data.get("target", "").strip() or slug
     category = data.get("category", "Chung").strip() or "Chung"
     description = data.get("description", "").strip()
+    cookie = data.get("cookie", "").strip()
 
     feeds = load_feeds()
     feeds[slug] = {
@@ -73,6 +74,7 @@ async def api_create_or_update_feed(request: Request):
         "target": target,
         "category": category,
         "description": description,
+        "cookie": cookie,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     save_feeds(feeds)
@@ -125,6 +127,8 @@ async def dashboard(request: Request):
         if feed_type == "rsshub": type_badge = "RSSHUB"
         elif feed_type == "custom_rss": type_badge = "EXTERNAL RSS"
 
+        cookie_badge = '<span class="badge" style="padding: 2px 6px; font-size: 0.65rem; background: rgba(16, 185, 129, 0.12); color: #34d399; border-color: rgba(16, 185, 129, 0.3);" title="Đã nạp Cookie xác thực"><span class="dot" style="background:#10b981; box-shadow:0 0 6px #10b981;"></span> Login Cookie</span>' if meta.get("cookie") else ""
+
         # Recent items preview
         preview_items_html = ""
         for p in posts[:3]:
@@ -160,6 +164,7 @@ async def dashboard(request: Request):
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <span style="font-size: 0.68rem; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.05em;">{cat}</span>
                             <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.06); color: var(--text-dim); border: 1px solid var(--card-border);">{type_badge}</span>
+                            {cookie_badge}
                         </div>
                         <div class="task-title" style="margin-top: 2px;">{meta['title']}</div>
                     </div>
@@ -1144,6 +1149,12 @@ async def dashboard(request: Request):
           <textarea id="feedDesc" class="form-textarea" rows="2" placeholder="Mô tả nội dung kênh feed này..."></textarea>
         </div>
 
+        <div class="form-group">
+          <label class="form-label">Cookie / Phiên đăng nhập (Tùy chọn cho trang yêu cầu Login)</label>
+          <textarea id="feedCookie" class="form-textarea" rows="2" placeholder="vd: sessionid=xyz...; token=abc...; hoặc chuỗi JSON từ Cookie-Editor" style="font-family: var(--mono); font-size: 0.76rem;"></textarea>
+          <div class="form-hint">Dán chuỗi Cookie từ trình duyệt để cào các trang yêu cầu đăng nhập, bài viết riêng tư hoặc diễn đàn thành viên.</div>
+        </div>
+
         <div style="display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:24px; padding-top:16px; border-top:1px solid var(--card-border);">
           <button type="button" class="btn" onclick="closeModal('modalAdd')">Hủy bỏ</button>
           <button type="submit" id="btnSubmitFeed" class="btn primary">
@@ -1297,7 +1308,8 @@ async def dashboard(request: Request):
         type: document.getElementById('feedType').value,
         target: document.getElementById('feedTarget').value.trim(),
         category: document.getElementById('feedCategory').value.trim() || 'Chung',
-        description: document.getElementById('feedDesc').value.trim()
+        description: document.getElementById('feedDesc').value.trim(),
+        cookie: document.getElementById('feedCookie').value.trim()
       }};
 
       fetch('/api/feeds', {{

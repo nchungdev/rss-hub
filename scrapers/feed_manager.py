@@ -169,14 +169,29 @@ def parse_xml_feed(xml_text: str) -> list:
 
     return posts
 
+def format_cookie_headers(cookie_raw: str) -> str:
+    if not cookie_raw:
+        return ""
+    cookie_raw = cookie_raw.strip()
+    # Check if user pasted JSON array from Cookie-Editor extension
+    if cookie_raw.startswith("[") and cookie_raw.endswith("]"):
+        try:
+            arr = json.loads(cookie_raw)
+            if isinstance(arr, list):
+                return "; ".join([f"{item.get('name')}={item.get('value')}" for item in arr if item.get('name')])
+        except Exception:
+            pass
+    return cookie_raw
+
 def get_feed_posts(slug: str, force_refresh: bool = False) -> list:
     feeds = load_feeds()
     meta = feeds.get(slug, {})
     feed_type = meta.get("type", "threads")
     target = meta.get("target", slug)
+    cookie = meta.get("cookie", "").strip()
 
     if feed_type == "threads":
-        return get_threads_feed(target, force_refresh)
+        return get_threads_feed(target, force_refresh, custom_cookie=cookie)
 
     cache_file = os.path.join(DATA_DIR, f"history_{slug}.json")
 
@@ -199,8 +214,16 @@ def get_feed_posts(slug: str, force_refresh: bool = False) -> list:
         url = f"{RSSHUB_UPSTREAM}/{target_path}"
 
     logger.info(f"Fetching feed [{slug}] type={feed_type} from {url}...")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    if cookie:
+        formatted_cookie = format_cookie_headers(cookie)
+        headers["Cookie"] = formatted_cookie
+        logger.info(f"Attached custom authentication cookie to feed [{slug}] request")
+
     try:
-        with httpx.Client(timeout=25.0, headers={"User-Agent": "Mozilla/5.0 (ClaraOS RSS Wrapper)"}) as client:
+        with httpx.Client(timeout=25.0, headers=headers) as client:
             resp = client.get(url)
             if resp.status_code == 200:
                 posts = parse_xml_feed(resp.text)

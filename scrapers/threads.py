@@ -52,11 +52,11 @@ def find_posts_recursive(obj):
             posts.extend(find_posts_recursive(item))
     return posts
 
-def fetch_threads_posts(tag: str = "bookthreads", max_timeout: int = 60000) -> list:
+def fetch_threads_posts(tag: str = "bookthreads", max_timeout: int = 60000, custom_cookie: str = None) -> list:
     url = f"https://www.threads.com/search?q={tag}&serp_type=tags"
     logger.info(f"Querying FlareSolverr ({FLARESOLVERR_URL}) for {url}...")
     
-    session_cookie = load_session_cookie()
+    session_cookie = custom_cookie or load_session_cookie()
     payload = {
         "cmd": "request.get",
         "url": url,
@@ -65,10 +65,13 @@ def fetch_threads_posts(tag: str = "bookthreads", max_timeout: int = 60000) -> l
     
     if session_cookie:
         logger.info("Using session cookie for personalized community feed...")
+        val = session_cookie.strip()
+        if "sessionid=" in val:
+            val = val.split("sessionid=")[1].split(";")[0].strip()
         payload["cookies"] = [
             {
                 "name": "sessionid",
-                "value": session_cookie,
+                "value": val,
                 "domain": ".threads.com"
             }
         ]
@@ -156,7 +159,7 @@ def fetch_threads_posts(tag: str = "bookthreads", max_timeout: int = 60000) -> l
 
     return parsed_posts
 
-def get_or_update_feed(tag: str = "bookthreads", force_refresh: bool = False, max_items: int = 100) -> list:
+def get_or_update_feed(tag: str = "bookthreads", force_refresh: bool = False, max_items: int = 100, custom_cookie: str = None) -> list:
     os.makedirs(DATA_DIR, exist_ok=True)
     history_file = os.path.join(DATA_DIR, f"history_{tag}.json")
     history = {}
@@ -170,7 +173,7 @@ def get_or_update_feed(tag: str = "bookthreads", force_refresh: bool = False, ma
 
     # If force refresh or empty, fetch new
     if force_refresh or not history:
-        new_posts = fetch_threads_posts(tag)
+        new_posts = fetch_threads_posts(tag, custom_cookie=custom_cookie)
         for p in new_posts:
             code = p["code"]
             if code not in history:
