@@ -29,6 +29,8 @@ DEFAULT_FEEDS = {
         "description": "Các bài chia sẻ sách, review và link Ebook Google Drive từ cộng đồng Book Threads Việt Nam.",
         "icon": "book",
         "site_url": "https://www.threads.com/search?q=bookthreads&serp_type=tags",
+        "cookie_mode": "profile",
+        "cookie_profile": "threads_main",
         "created_at": "2026-10-04T12:00:00Z"
     }
 }

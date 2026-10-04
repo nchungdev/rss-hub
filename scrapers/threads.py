@@ -53,10 +53,18 @@ def find_posts_recursive(obj):
     return posts
 
 def fetch_threads_posts(tag: str = "bookthreads", max_timeout: int = 60000, custom_cookie: str = None) -> list:
-    url = f"https://www.threads.com/search?q={tag}&serp_type=tags"
+    tag_clean = tag.strip()
+    if tag_clean.startswith("http://") or tag_clean.startswith("https://"):
+        url = tag_clean
+    elif tag_clean.startswith("@"):
+        url = f"https://www.threads.net/{tag_clean}"
+    else:
+        from urllib.parse import quote_plus
+        url = f"https://www.threads.net/search?q={quote_plus(tag_clean)}&serp_type=tags"
+
     logger.info(f"Querying FlareSolverr ({FLARESOLVERR_URL}) for {url}...")
     
-    session_cookie = custom_cookie or load_session_cookie()
+    session_cookie = (custom_cookie or "").strip()
     payload = {
         "cmd": "request.get",
         "url": url,
@@ -64,7 +72,7 @@ def fetch_threads_posts(tag: str = "bookthreads", max_timeout: int = 60000, cust
     }
     
     if session_cookie:
-        logger.info("Using session cookie for personalized community feed...")
+        logger.info("Using designated session cookie for this feed...")
         val = session_cookie.strip()
         if "sessionid=" in val:
             val = val.split("sessionid=")[1].split(";")[0].strip()
@@ -161,7 +169,8 @@ def fetch_threads_posts(tag: str = "bookthreads", max_timeout: int = 60000, cust
 
 def get_or_update_feed(tag: str = "bookthreads", force_refresh: bool = False, max_items: int = 100, custom_cookie: str = None) -> list:
     os.makedirs(DATA_DIR, exist_ok=True)
-    history_file = os.path.join(DATA_DIR, f"history_{tag}.json")
+    safe_tag = re.sub(r'[^a-zA-Z0-9_-]', '_', tag.strip())
+    history_file = os.path.join(DATA_DIR, f"history_{safe_tag}.json")
     history = {}
     
     if os.path.exists(history_file):
