@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.session_cookie
+data/*.json
+*.log
+.DS_Store
