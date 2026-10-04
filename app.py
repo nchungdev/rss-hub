@@ -269,49 +269,23 @@ async def dashboard(request: Request):
                 {meta.get('description', '')}
             </div>
 
-            <!-- Feed URL Rows -->
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-                <!-- RSS 2.0 -->
-                <div style="display: flex; align-items: center; gap: 8px; background: rgba(7, 12, 24, 0.8); border: 1px solid var(--card-border); border-radius: 12px; padding: 6px 10px;">
-                    <span style="font-size: 0.7rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: rgba(245, 158, 11, 0.12); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); text-align: center; width: 62px;">RSS 2.0</span>
-                    <input type="text" readonly value="{BASE_URL}/{slug}.xml" style="background: transparent; border: none; outline: none; color: #cbd5e1; font-family: var(--mono); font-size: 0.78rem; flex: 1; min-width: 0;" />
-                    <a href="{BASE_URL}/{slug}.xml" target="_blank" class="btn" style="height: 30px; padding: 0 10px; font-size: 0.74rem;" title="Mở trong tab mới">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                        <span>Mở</span>
-                    </a>
-                    <button class="btn" onclick="copyLink('{BASE_URL}/{slug}.xml', this)" style="height: 30px; padding: 0 10px; font-size: 0.74rem;">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-                        <span>Sao chép</span>
-                    </button>
-                </div>
-
-                <!-- JSON Feed -->
-                <div style="display: flex; align-items: center; gap: 8px; background: rgba(7, 12, 24, 0.8); border: 1px solid var(--card-border); border-radius: 12px; padding: 6px 10px;">
-                    <span style="font-size: 0.7rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3); text-align: center; width: 62px;">JSON</span>
-                    <input type="text" readonly value="{BASE_URL}/{slug}.json" style="background: transparent; border: none; outline: none; color: #cbd5e1; font-family: var(--mono); font-size: 0.78rem; flex: 1; min-width: 0;" />
-                    <a href="{BASE_URL}/{slug}.json" target="_blank" class="btn" style="height: 30px; padding: 0 10px; font-size: 0.74rem;" title="Mở trong tab mới">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                        <span>Mở</span>
-                    </a>
-                    <button class="btn" onclick="copyLink('{BASE_URL}/{slug}.json', this)" style="height: 30px; padding: 0 10px; font-size: 0.74rem;">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-                        <span>Sao chép</span>
-                    </button>
-                </div>
-
-                <!-- ATOM Feed -->
-                <div style="display: flex; align-items: center; gap: 8px; background: rgba(7, 12, 24, 0.8); border: 1px solid var(--card-border); border-radius: 12px; padding: 6px 10px;">
-                    <span style="font-size: 0.7rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: rgba(139, 92, 246, 0.12); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.3); text-align: center; width: 62px;">ATOM</span>
-                    <input type="text" readonly value="{BASE_URL}/{slug}.atom" style="background: transparent; border: none; outline: none; color: #cbd5e1; font-family: var(--mono); font-size: 0.78rem; flex: 1; min-width: 0;" />
-                    <a href="{BASE_URL}/{slug}.atom" target="_blank" class="btn" style="height: 30px; padding: 0 10px; font-size: 0.74rem;" title="Mở trong tab mới">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                        <span>Mở</span>
-                    </a>
-                    <button class="btn" onclick="copyLink('{BASE_URL}/{slug}.atom', this)" style="height: 30px; padding: 0 10px; font-size: 0.74rem;">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-                        <span>Sao chép</span>
-                    </button>
-                </div>
+            <!-- Feed Format Buttons (XML, JSON, ATOM) -->
+            <div class="format-btn-group">
+                <a href="{BASE_URL}/{slug}.xml" target="_blank" rel="noopener noreferrer" class="format-btn xml" title="Mở RSS 2.0 (XML): {BASE_URL}/{slug}.xml">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; flex-shrink: 0;"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>
+                    <span>XML</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px; opacity: 0.6; flex-shrink: 0;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                </a>
+                <a href="{BASE_URL}/{slug}.json" target="_blank" rel="noopener noreferrer" class="format-btn json" title="Mở JSON Feed: {BASE_URL}/{slug}.json">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; flex-shrink: 0;"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                    <span>JSON</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px; opacity: 0.6; flex-shrink: 0;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                </a>
+                <a href="{BASE_URL}/{slug}.atom" target="_blank" rel="noopener noreferrer" class="format-btn atom" title="Mở Atom Feed: {BASE_URL}/{slug}.atom">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; flex-shrink: 0;"><circle cx="12" cy="12" r="3"/><line x1="3" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="21" y2="12"/><line x1="12" y1="3" x2="12" y2="9"/><line x1="12" y1="15" x2="12" y2="21"/></svg>
+                    <span>ATOM</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px; opacity: 0.6; flex-shrink: 0;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                </a>
             </div>
 
             <!-- Recent Items Box -->
@@ -619,6 +593,69 @@ async def dashboard(request: Request):
       background: rgba(244, 63, 94, 0.25);
       border-color: rgba(244, 63, 94, 0.6);
       color: #fff;
+    }}
+
+    /* Format Endpoint Buttons (XML, JSON, ATOM) */
+    .format-btn-group {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 8px 0 12px 0;
+    }}
+    .format-btn {{
+      flex: 1;
+      min-width: 0;
+      height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 10px;
+      border-radius: 10px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      font-family: var(--mono);
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      box-sizing: border-box;
+      white-space: nowrap;
+    }}
+    .format-btn:hover {{
+      transform: translateY(-1.5px);
+    }}
+    .format-btn.xml {{
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: #fbbf24;
+    }}
+    .format-btn.xml:hover {{
+      background: rgba(245, 158, 11, 0.22);
+      border-color: rgba(245, 158, 11, 0.6);
+      box-shadow: 0 4px 14px rgba(245, 158, 11, 0.25);
+      color: #fef3c7;
+    }}
+    .format-btn.json {{
+      background: rgba(14, 165, 233, 0.1);
+      border: 1px solid rgba(14, 165, 233, 0.3);
+      color: #38bdf8;
+    }}
+    .format-btn.json:hover {{
+      background: rgba(14, 165, 233, 0.22);
+      border-color: rgba(14, 165, 233, 0.6);
+      box-shadow: 0 4px 14px rgba(14, 165, 233, 0.25);
+      color: #e0f2fe;
+    }}
+    .format-btn.atom {{
+      background: rgba(139, 92, 246, 0.1);
+      border: 1px solid rgba(139, 92, 246, 0.3);
+      color: #c084fc;
+    }}
+    .format-btn.atom:hover {{
+      background: rgba(139, 92, 246, 0.22);
+      border-color: rgba(139, 92, 246, 0.6);
+      box-shadow: 0 4px 14px rgba(139, 92, 246, 0.25);
+      color: #f3e8ff;
     }}
 
     /* Stats Grid */
