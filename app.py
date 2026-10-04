@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 from typing import Optional
+import httpx
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 
@@ -25,7 +26,7 @@ CUSTOM_FEEDS = {
         "title": "Book Threads (Cộng đồng Sách)",
         "category": "Cộng đồng & Sách",
         "description": "Các bài chia sẻ sách, review và link Ebook Google Drive từ cộng đồng Book Threads Việt Nam.",
-        "icon": "fa-solid fa-book-open-reader",
+        "icon": "book",
         "accent": "cyan"
     }
 }
@@ -57,275 +58,969 @@ async def refresh_feed(tag: str):
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     feed_cards = ""
+    total_posts = 0
+
     for tag, meta in CUSTOM_FEEDS.items():
         posts = await asyncio.to_thread(get_or_update_feed, tag, False)
         count = len(posts)
+        total_posts += count
         
         # Recent items preview
         preview_items_html = ""
         for p in posts[:4]:
             user = p.get("username", "user")
-            text = p.get("text", "").split("\n")[0][:90]
+            raw_text = p.get("text", "").strip()
+            first_line = raw_text.split("\n")[0][:110] if raw_text else "Bài viết không có nội dung văn bản"
             gdrive = p.get("gdrive_links", [])
-            badge = '<span class="bg-cyan-500/20 text-cyan-300 text-[10px] px-1.5 py-0.5 rounded font-medium border border-cyan-500/30">Ebook Drive</span>' if gdrive else ""
+            badge = '<span class="badge cyan" style="padding: 2px 8px; font-size: 0.68rem;"><span class="dot"></span> Ebook Drive</span>' if gdrive else ""
+            
             preview_items_html += f"""
-            <div class="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800/80 text-xs flex flex-col gap-1 hover:border-slate-700 transition">
-                <div class="flex items-center justify-between text-slate-400 text-[11px]">
-                    <span class="font-medium text-slate-300">@{user}</span>
+            <div style="background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 4px; transition: border-color 0.2s ease;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <span style="font-weight: 600; font-size: 0.75rem; color: #38bdf8;">@{user}</span>
                     {badge}
                 </div>
-                <div class="text-slate-300 line-clamp-2 leading-relaxed">{text}...</div>
+                <div style="color: var(--text-muted); font-size: 0.76rem; line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">
+                    {first_line}...
+                </div>
             </div>
             """
 
         feed_cards += f"""
-        <div class="glass-card rounded-2xl p-6 flex flex-col justify-between relative overflow-hidden group">
-            <div class="absolute -top-12 -right-12 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl group-hover:bg-cyan-500/20 transition duration-500"></div>
-            
-            <div>
-                <div class="flex items-start justify-between mb-4">
-                    <div class="flex items-center gap-3">
-                        <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-cyan-600/30 to-blue-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 text-xl shadow-lg shadow-cyan-950/50">
-                            <i class="{meta['icon']}"></i>
-                        </div>
-                        <div>
-                            <span class="text-[11px] font-semibold uppercase tracking-wider text-cyan-400 block">{meta['category']}</span>
-                            <h2 class="text-lg font-bold text-slate-100 group-hover:text-white transition">{meta['title']}</h2>
-                        </div>
+        <div class="task-card">
+            <div class="task-card-head">
+                <div style="display: flex; align-items: center; gap: 14px;">
+                    <div class="brand-icon" style="background: linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(99, 102, 241, 0.25)); border: 1px solid rgba(14, 165, 233, 0.3);">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 22px; height: 22px; color: #38bdf8;">
+                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                        </svg>
                     </div>
-                    <span class="bg-cyan-500/10 text-cyan-400 text-xs px-2.5 py-1 rounded-full border border-cyan-500/20 font-medium shrink-0 flex items-center gap-1.5">
-                        <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span> {count} bài viết
-                    </span>
-                </div>
-                
-                <p class="text-slate-400 text-xs leading-relaxed mb-5">{meta['description']}</p>
-
-                <!-- URL Endpoint Rows -->
-                <div class="space-y-2 mb-5">
-                    <div class="flex items-center gap-2 bg-slate-950/70 p-1.5 rounded-xl border border-slate-800/80 focus-within:border-cyan-500/50 transition">
-                        <span class="text-[11px] font-bold tracking-wider px-2 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 uppercase w-14 text-center">RSS</span>
-                        <input type="text" readonly value="{BASE_URL}/{tag}.xml" class="bg-transparent text-slate-300 font-mono text-xs flex-1 outline-none select-all px-1" />
-                        <button onclick="copyLink('{BASE_URL}/{tag}.xml', this)" class="bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white px-3 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1 border border-slate-700">
-                            <i class="fa-solid fa-copy text-[11px]"></i> Copy
-                        </button>
-                    </div>
-
-                    <div class="flex items-center gap-2 bg-slate-950/70 p-1.5 rounded-xl border border-slate-800/80 focus-within:border-cyan-500/50 transition">
-                        <span class="text-[11px] font-bold tracking-wider px-2 py-1 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 uppercase w-14 text-center">JSON</span>
-                        <input type="text" readonly value="{BASE_URL}/{tag}.json" class="bg-transparent text-slate-300 font-mono text-xs flex-1 outline-none select-all px-1" />
-                        <button onclick="copyLink('{BASE_URL}/{tag}.json', this)" class="bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white px-3 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1 border border-slate-700">
-                            <i class="fa-solid fa-copy text-[11px]"></i> Copy
-                        </button>
-                    </div>
-
-                    <div class="flex items-center gap-2 bg-slate-950/70 p-1.5 rounded-xl border border-slate-800/80 focus-within:border-cyan-500/50 transition">
-                        <span class="text-[11px] font-bold tracking-wider px-2 py-1 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 uppercase w-14 text-center">ATOM</span>
-                        <input type="text" readonly value="{BASE_URL}/{tag}.atom" class="bg-transparent text-slate-300 font-mono text-xs flex-1 outline-none select-all px-1" />
-                        <button onclick="copyLink('{BASE_URL}/{tag}.atom', this)" class="bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white px-3 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1 border border-slate-700">
-                            <i class="fa-solid fa-copy text-[11px]"></i> Copy
-                        </button>
+                    <div>
+                        <div style="font-size: 0.7rem; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.05em;">{meta['category']}</div>
+                        <div class="task-title" style="margin-top: 2px;">{meta['title']}</div>
                     </div>
                 </div>
 
-                <!-- Articles Mini Preview -->
-                <div class="space-y-1.5 mb-5">
-                    <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">
-                        <i class="fa-solid fa-clock-rotate-left mr-1"></i> Bài viết gần đây
-                    </span>
-                    <div class="space-y-1.5">
-                        {preview_items_html}
-                    </div>
+                <div class="badge green">
+                    <span class="dot"></span>
+                    <span>{count} bài viết</span>
                 </div>
             </div>
 
-            <div class="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                <span class="text-slate-500 text-[11px]"><i class="fa-solid fa-bolt text-cyan-500 mr-1"></i> Quét mỗi 30p</span>
-                <button onclick="refreshFeed('{tag}', this)" class="text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1.5 py-1 px-2.5 rounded-lg hover:bg-cyan-500/10 transition">
-                    <i class="fa-solid fa-rotate"></i> Cào mới ngay
-                </button>
+            <div style="color: var(--text-muted); font-size: 0.8rem; line-height: 1.5; margin: 4px 0 8px 0;">
+                {meta['description']}
+            </div>
+
+            <!-- Feed URL Rows -->
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <!-- RSS 2.0 -->
+                <div style="display: flex; align-items: center; gap: 8px; background: rgba(7, 12, 24, 0.8); border: 1px solid var(--card-border); border-radius: 12px; padding: 6px 10px;">
+                    <span style="font-size: 0.7rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: rgba(245, 158, 11, 0.12); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); text-align: center; width: 62px;">RSS 2.0</span>
+                    <input type="text" readonly value="{BASE_URL}/{tag}.xml" style="background: transparent; border: none; outline: none; color: #cbd5e1; font-family: var(--mono); font-size: 0.78rem; flex: 1; min-width: 0;" />
+                    <button class="btn" onclick="copyLink('{BASE_URL}/{tag}.xml', this)" style="height: 30px; padding: 0 10px; font-size: 0.74rem;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                        <span>Sao chép</span>
+                    </button>
+                </div>
+
+                <!-- JSON Feed -->
+                <div style="display: flex; align-items: center; gap: 8px; background: rgba(7, 12, 24, 0.8); border: 1px solid var(--card-border); border-radius: 12px; padding: 6px 10px;">
+                    <span style="font-size: 0.7rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3); text-align: center; width: 62px;">JSON</span>
+                    <input type="text" readonly value="{BASE_URL}/{tag}.json" style="background: transparent; border: none; outline: none; color: #cbd5e1; font-family: var(--mono); font-size: 0.78rem; flex: 1; min-width: 0;" />
+                    <button class="btn" onclick="copyLink('{BASE_URL}/{tag}.json', this)" style="height: 30px; padding: 0 10px; font-size: 0.74rem;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                        <span>Sao chép</span>
+                    </button>
+                </div>
+
+                <!-- ATOM Feed -->
+                <div style="display: flex; align-items: center; gap: 8px; background: rgba(7, 12, 24, 0.8); border: 1px solid var(--card-border); border-radius: 12px; padding: 6px 10px;">
+                    <span style="font-size: 0.7rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: rgba(139, 92, 246, 0.12); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.3); text-align: center; width: 62px;">ATOM</span>
+                    <input type="text" readonly value="{BASE_URL}/{tag}.atom" style="background: transparent; border: none; outline: none; color: #cbd5e1; font-family: var(--mono); font-size: 0.78rem; flex: 1; min-width: 0;" />
+                    <button class="btn" onclick="copyLink('{BASE_URL}/{tag}.atom', this)" style="height: 30px; padding: 0 10px; font-size: 0.74rem;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                        <span>Sao chép</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Recent Items Box -->
+            <div style="margin-top: 10px;">
+                <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <span>Bài viết vừa cào gần đây</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr; gap: 8px;">
+                    {preview_items_html}
+                </div>
+            </div>
+
+            <!-- Card Action Footer -->
+            <div class="task-card-footer" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--card-border);">
+                <div style="display: flex; align-items: center; gap: 8px; font-size: 0.74rem; color: var(--text-dim);">
+                    <span class="dot" style="background: #0ea5e9;"></span>
+                    <span>Tự động quét mỗi {SCRAPE_INTERVAL_MINUTES} phút &bull; Tương thích Miniflux, Feedly, Telegram</span>
+                </div>
+                <div class="task-actions-row">
+                    <button class="btn primary" onclick="refreshFeed('{tag}', this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 15px; height: 15px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                        <span>Cào mới ngay</span>
+                    </button>
+                </div>
             </div>
         </div>
         """
 
-    html_content = f"""
-    <!DOCTYPE html>
-    <html lang="vi" class="dark">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>RSS Hub &bull; ClaraOS</title>
-        <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2306b6d4'/><path d='M8 24a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0-10a13 13 0 0 1 13 13h-3a10 10 0 0 0-10-10v-3zm0-6a19 19 0 0 1 19 19h-3A16 16 0 0 0 8 11V8z' fill='white'/></svg>">
-        
-        <!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono -->
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-        
-        <!-- Font Awesome 6.4.0 -->
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-        
-        <!-- Tailwind CSS CDN -->
-        <script src="https://cdn.tailwindcss.com"></script>
-        
-        <style>
-            :root {{
-                --clara-bg: #080c14;
-                --clara-surface: #0f172a;
-                --clara-surface-card: rgba(15, 23, 42, 0.75);
-                --clara-surface-card-hover: rgba(30, 41, 59, 0.85);
-                --clara-border: rgba(255, 255, 255, 0.08);
-                --clara-border-hover: rgba(255, 255, 255, 0.18);
-                --clara-cyan: #06b6d4;
-                --clara-font-sans: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
-                --clara-font-mono: "JetBrains Mono", monospace;
-            }}
+    html_content = f"""<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RSS Hub | ClaraOS Feed Engine</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%230284c7'/%3E%3Cstop offset='100%25' stop-color='%2338bdf8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Ccircle cx='8' cy='24' r='3' fill='%23ffffff'/%3E%3Cpath d='M8 14a10 10 0 0 1 10 10h-3a7 7 0 0 0-7-7v-3z' fill='%23ffffff'/%3E%3Cpath d='M8 8a16 16 0 0 1 16 16h-3A13 13 0 0 0 8 11V8z' fill='%23ffffff'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {{
+      --bg: #070c18;
+      --card-bg: rgba(15, 23, 42, 0.75);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --card-hover: rgba(56, 189, 248, 0.2);
+      --primary: #0ea5e9;
+      --primary-glow: rgba(14, 165, 233, 0.35);
+      --emerald: #10b981;
+      --emerald-glow: rgba(16, 185, 129, 0.3);
+      --amber: #f59e0b;
+      --rose: #f43f5e;
+      --violet: #8b5cf6;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --sidebar-w: 260px;
+      --font: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+      --mono: "JetBrains Mono", monospace;
+    }}
 
-            body {{
-                background-color: var(--clara-bg);
-                background-image: 
-                    radial-gradient(at 0% 0%, rgba(6, 182, 212, 0.08) 0px, transparent 50%),
-                    radial-gradient(at 100% 0%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
-                    radial-gradient(at 50% 100%, rgba(16, 185, 129, 0.05) 0px, transparent 50%);
-                background-attachment: fixed;
-                font-family: var(--clara-font-sans);
-                color: #f8fafc;
-            }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: var(--font);
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+      background-image: 
+        radial-gradient(circle at 10% 15%, rgba(14, 165, 233, 0.12), transparent 40%),
+        radial-gradient(circle at 90% 20%, rgba(139, 92, 246, 0.1), transparent 45%),
+        radial-gradient(circle at 50% 95%, rgba(16, 185, 129, 0.08), transparent 50%);
+      background-attachment: fixed;
+    }}
 
-            .font-mono {{ font-family: var(--clara-font-mono); }}
+    ::-webkit-scrollbar {{ width: 8px; height: 8px; }}
+    ::-webkit-scrollbar-track {{ background: rgba(0,0,0,0.2); }}
+    ::-webkit-scrollbar-thumb {{ background: rgba(255,255,255,0.15); border-radius: 4px; }}
+    ::-webkit-scrollbar-thumb:hover {{ background: rgba(255,255,255,0.3); }}
 
-            .glass-panel {{
-                background: var(--clara-surface-card);
-                backdrop-filter: blur(16px);
-                -webkit-backdrop-filter: blur(16px);
-                border: 1px solid var(--clara-border);
-            }}
+    /* ClaraOS Sidebar */
+    .torbox-sidebar {{
+      width: var(--sidebar-w);
+      min-width: var(--sidebar-w);
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-right: 1px solid var(--card-border);
+      display: flex;
+      flex-direction: column;
+      z-index: 100;
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      flex-shrink: 0;
+      height: 100vh;
+    }}
+    .sidebar-brand {{
+      height: 64px;
+      padding: 0 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid var(--card-border);
+    }}
+    .brand-icon {{
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #0ea5e9, #6366f1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 16px var(--primary-glow);
+      flex-shrink: 0;
+    }}
+    .brand-icon svg {{ width: 22px; height: 22px; fill: white; }}
+    .brand-title {{
+      font-size: 1.12rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      background: linear-gradient(to right, #ffffff, #cbd5e1);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }}
+    .brand-sub {{
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      font-weight: 500;
+    }}
 
-            .glass-card {{
-                background: var(--clara-surface-card);
-                backdrop-filter: blur(16px);
-                -webkit-backdrop-filter: blur(16px);
-                border: 1px solid var(--clara-border);
-                box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-                transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-            }}
+    .sidebar-nav {{
+      flex: 1;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      overflow-y: auto;
+    }}
+    .nav-section-title {{
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+      padding: 6px 10px;
+      text-transform: uppercase;
+    }}
+    .nav-item {{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      font-weight: 500;
+      text-decoration: none;
+      transition: all 0.15s ease;
+    }}
+    .nav-item:hover {{
+      background: rgba(255, 255, 255, 0.06);
+      color: #fff;
+    }}
+    .nav-item.active {{
+      background: rgba(14, 165, 233, 0.15);
+      color: #38bdf8;
+      font-weight: 600;
+      border-left: 3px solid #0ea5e9;
+    }}
+    .nav-item svg {{ width: 18px; height: 18px; flex-shrink: 0; }}
 
-            .glass-card:hover {{
-                background: var(--clara-surface-card-hover);
-                border-color: rgba(6, 182, 212, 0.35);
-                box-shadow: 0 12px 40px 0 rgba(6, 182, 212, 0.15);
-                transform: translateY(-2px);
-            }}
+    .sidebar-telemetry {{
+      padding: 14px;
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      flex-direction: row;
+      gap: 8px;
+    }}
 
-            ::-webkit-scrollbar {{ width: 6px; height: 6px; }}
-            ::-webkit-scrollbar-track {{ background: transparent; }}
-            ::-webkit-scrollbar-thumb {{ background: rgba(255, 255, 255, 0.15); border-radius: 9999px; }}
-            ::-webkit-scrollbar-thumb:hover {{ background: rgba(255, 255, 255, 0.25); }}
-        </style>
-    </head>
-    <body class="min-h-screen flex flex-col antialiased">
-        <!-- ClaraOS Header -->
-        <header class="glass-panel sticky top-0 z-30 border-b border-slate-800/80">
-            <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-                <div class="flex items-center gap-3">
-                    <a href="{CLARAOS_URL}" class="flex items-center gap-3 group">
-                        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white shadow-lg shadow-cyan-500/25 group-hover:shadow-cyan-500/40 transition">
-                            <i class="fa-solid fa-rss text-lg"></i>
-                        </div>
-                        <div>
-                            <div class="flex items-center gap-2">
-                                <span class="font-extrabold text-base tracking-wide bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">RSS Hub</span>
-                                <span class="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">ClaraOS</span>
-                            </div>
-                            <span class="text-[11px] text-slate-400 block -mt-0.5 font-normal">Multi-source Feed Generator &amp; Scraper</span>
-                        </div>
-                    </a>
-                </div>
+    /* Viewport & Header */
+    .torbox-main-viewport {{
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      overflow-y: auto;
+      height: 100vh;
+    }}
+    .topbar-header {{
+      height: 64px;
+      background: rgba(7, 12, 24, 0.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 0 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      flex-shrink: 0;
+    }}
+    .page-title {{
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: #fff;
+      margin: 0;
+      white-space: nowrap;
+    }}
 
-                <div class="flex items-center gap-3">
-                    <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
-                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                        <span>Gateway Active</span>
-                    </div>
+    main {{
+      flex: 1;
+      width: 100%;
+      padding: 18px 32px 80px 32px;
+      box-sizing: border-box;
+    }}
 
-                    <a href="{CLARAOS_URL}" class="px-3 py-1.5 rounded-xl bg-slate-800/70 hover:bg-slate-700/80 border border-slate-700/70 text-slate-300 hover:text-white text-xs font-medium transition flex items-center gap-1.5" title="Trở về ClaraOS">
-                        <i class="fa-solid fa-arrow-left text-[11px]"></i>
-                        <span class="hidden sm:inline">ClaraOS</span>
-                    </a>
-                </div>
-            </div>
-        </header>
+    /* Badges */
+    .badge {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      white-space: nowrap;
+    }}
+    .badge.green {{
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(16, 185, 129, 0.3);
+      color: #34d399;
+    }}
+    .badge.cyan {{
+      background: rgba(14, 165, 233, 0.12);
+      border-color: rgba(14, 165, 233, 0.3);
+      color: #38bdf8;
+    }}
+    .dot {{
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-dim);
+    }}
+    .badge.green .dot {{ background: #10b981; box-shadow: 0 0 8px #10b981; }}
+    .badge.cyan .dot {{ background: #0ea5e9; box-shadow: 0 0 8px #0ea5e9; }}
 
-        <!-- Main Content -->
-        <main class="max-w-6xl mx-auto px-4 py-8 flex-1 w-full">
-            <div class="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
-                <div>
-                    <h2 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Kênh Feed Hoạt Động</h2>
-                    <p class="text-sm text-slate-400 mt-1">Các nguồn RSS được tối ưu riêng biệt kèm bộ lọc Ebook và link tải Google Drive.</p>
-                </div>
+    /* Buttons */
+    .btn {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 36px;
+      padding: 0 14px;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border: 1px solid var(--card-border);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text);
+      font-family: var(--font);
+      text-decoration: none;
+      box-sizing: border-box;
+      white-space: nowrap;
+    }}
+    .btn:hover {{
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.2);
+      transform: translateY(-1px);
+    }}
+    .btn.primary {{
+      background: linear-gradient(135deg, #0284c7, #0369a1);
+      border-color: rgba(14, 165, 233, 0.4);
+      color: white;
+      box-shadow: 0 4px 14px var(--primary-glow);
+    }}
+    .btn.primary:hover {{
+      background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+      box-shadow: 0 6px 20px rgba(14, 165, 233, 0.45);
+    }}
 
-                <div class="flex items-center gap-2 text-xs text-slate-400 font-mono bg-slate-900/60 px-3 py-2 rounded-xl border border-slate-800">
-                    <i class="fa-solid fa-link text-cyan-400"></i>
-                    <span>Subdomain: <strong class="text-slate-200">rss.data1box.win</strong></span>
-                </div>
-            </div>
+    /* Stats Grid */
+    .stats-grid {{
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }}
+    .stat-card {{
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 18px;
+      backdrop-filter: blur(12px);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: all 0.2s ease;
+    }}
+    .stat-card:hover {{
+      border-color: var(--card-hover);
+      transform: translateY(-2px);
+    }}
+    .stat-card-icon {{
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }}
+    .stat-card-icon svg {{ width: 24px; height: 24px; }}
+    .stat-blue {{ background: rgba(14, 165, 233, 0.15); color: #38bdf8; }}
+    .stat-emerald {{ background: rgba(16, 185, 129, 0.15); color: #34d399; }}
+    .stat-violet {{ background: rgba(139, 92, 246, 0.15); color: #c084fc; }}
+    .stat-amber {{ background: rgba(245, 158, 11, 0.15); color: #fbbf24; }}
 
-            <!-- Cards Grid -->
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {feed_cards}
-            </div>
+    .stat-info .label {{
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }}
+    .stat-info .val {{
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: var(--text);
+      line-height: 1.2;
+      margin-top: 2px;
+    }}
+    .stat-info .desc {{
+      font-size: 0.72rem;
+      color: var(--text-dim);
+    }}
 
-            <!-- Quick Guide / Tips -->
-            <div class="mt-10 glass-card rounded-2xl p-6 border border-slate-800/80 relative overflow-hidden">
-                <div class="flex items-start gap-4">
-                    <div class="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0 text-lg">
-                        <i class="fa-solid fa-lightbulb"></i>
-                    </div>
-                    <div class="text-xs text-slate-400 space-y-1.5 flex-1">
-                        <h4 class="text-sm font-bold text-white mb-1">Hướng dẫn sử dụng nhanh trong hệ sinh thái ClaraOS:</h4>
-                        <p>&bull; <strong>Dành cho app đọc tin (Feedly, NetNewsWire, Miniflux):</strong> Copy đường link định dạng <code class="text-amber-400 font-mono bg-slate-950 px-1 py-0.5 rounded border border-slate-800">.xml</code>.</p>
-                        <p>&bull; <strong>Dành cho Automation (n8n, Bot Telegram, Script):</strong> Copy đường link định dạng <code class="text-cyan-400 font-mono bg-slate-950 px-1 py-0.5 rounded border border-slate-800">.json</code> (chuẩn JSON Feed v1.1).</p>
-                        <p>&bull; <strong>Tự động nhận diện Ebook:</strong> Các bài đăng chứa link Google Drive hoặc file Ebook (.epub, .pdf) sẽ được tự động đóng khung tải về tiện dụng.</p>
-                    </div>
-                </div>
-            </div>
-        </main>
+    /* Controls Bar & Filter Pills (Standardized Suite Template) */
+    .controls-bar {{
+      background: rgba(15, 23, 42, 0.65);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 10px 16px;
+      margin-bottom: 20px;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      min-height: 56px;
+    }}
+    .filter-pills {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }}
+    .pill {{
+      height: 36px;
+      padding: 0 14px;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid transparent;
+      color: var(--text-muted, #94a3b8);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }}
+    .pill:hover {{
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text, #f8fafc);
+    }}
+    .pill.active {{
+      background: rgba(14, 165, 233, 0.15);
+      color: #38bdf8;
+      border: 1px solid rgba(14, 165, 233, 0.4);
+      box-shadow: 0 0 12px rgba(14, 165, 233, 0.15);
+    }}
+    .pill-count {{
+      background: rgba(255, 255, 255, 0.08);
+      padding: 1px 7px;
+      border-radius: 9999px;
+      font-size: 0.72rem;
+      font-family: var(--mono);
+      color: inherit;
+    }}
+    .pill.active .pill-count {{
+      background: rgba(14, 165, 233, 0.25);
+      color: #38bdf8;
+    }}
 
-        <footer class="border-t border-slate-800/80 py-6 text-center text-xs text-slate-500">
-            ClaraOS &bull; RSS Hub Wrapper Service &bull; Designed with Clara Design System
-        </footer>
+    /* Task / Feed Cards */
+    .task-list {{
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }}
+    .task-card {{
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 20px;
+      backdrop-filter: blur(12px);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      transition: all 0.2s ease;
+    }}
+    .task-card:hover {{
+      border-color: rgba(255, 255, 255, 0.16);
+      transform: translateY(-1px);
+    }}
+    .task-card-head {{
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }}
+    .task-title {{
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #ffffff;
+    }}
+    .task-card-footer {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }}
+    .task-actions-row {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }}
 
-        <script>
-            function copyLink(url, btn) {{
-                navigator.clipboard.writeText(url).then(() => {{
-                    const orig = btn.innerHTML;
-                    btn.innerHTML = '<i class="fa-solid fa-check text-emerald-400"></i> Đã chép!';
-                    btn.classList.add('bg-emerald-500/20', 'border-emerald-500/40', 'text-emerald-300');
-                    setTimeout(() => {{
-                        btn.innerHTML = orig;
-                        btn.classList.remove('bg-emerald-500/20', 'border-emerald-500/40', 'text-emerald-300');
-                    }}, 2000);
-                }});
-            }}
+    /* Floating Dock Footer */
+    .content-footer {{
+      position: fixed;
+      bottom: 20px;
+      left: calc(50% + (var(--sidebar-w) / 2));
+      transform: translateX(-50%);
+      z-index: 45;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 9999px;
+      padding: 6px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+      max-width: calc(100vw - var(--sidebar-w) - 32px);
+      pointer-events: auto;
+    }}
+    .footer-stats-strip {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }}
+    .footer-stats-strip::-webkit-scrollbar {{ display: none; }}
+    .footer-stat-chip {{
+      height: 32px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 12px;
+      border-radius: 9999px;
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 0.74rem;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+      box-sizing: border-box;
+    }}
+    .footer-stat-chip:hover {{
+      border-color: rgba(255, 255, 255, 0.25);
+      background: rgba(30, 41, 59, 0.9);
+    }}
+    .chip-label {{
+      color: var(--text-dim, #94a3b8);
+      font-weight: 600;
+      font-size: 0.72rem;
+    }}
+    .chip-val {{
+      font-weight: 700;
+      color: #fff;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+    }}
+    .chip-cyan .chip-val {{ color: #38bdf8; }}
+    .chip-emerald .chip-val {{ color: #34d399; }}
+    .chip-amber .chip-val {{ color: #fbbf24; }}
+    .chip-violet .chip-val {{ color: #c084fc; }}
 
-            function refreshFeed(tag, btn) {{
-                const orig = btn.innerHTML;
-                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang cào...';
-                btn.disabled = true;
-                fetch('/api/refresh/' + tag)
-                    .then(r => r.json())
-                    .then(d => {{
-                        btn.innerHTML = '<i class="fa-solid fa-check"></i> Xong (' + d.count + ')';
-                        setTimeout(() => location.reload(), 1000);
-                    }})
-                    .catch(e => {{
-                        btn.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-rose-400"></i> Lỗi';
-                        setTimeout(() => {{ btn.innerHTML = orig; btn.disabled = false; }}, 2000);
-                    }});
-            }}
-        </script>
-    </body>
-    </html>
-    """
+    /* Toast Notification */
+    .toast {{
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 200;
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }}
+    .toast.show {{ transform: translateY(0); opacity: 1; }}
+    .toast.error {{ border-color: rgba(244, 63, 94, 0.5); color: #fda4af; }}
+
+    /* Mobile Responsive */
+    .hamburger-btn {{
+      display: none;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--card-border);
+      color: #fff;
+      font-size: 1.1rem;
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+    }}
+    .mobile-close-btn {{
+      display: none;
+      margin-left: auto;
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      font-size: 1.2rem;
+      cursor: pointer;
+      padding: 4px;
+    }}
+
+    @media (max-width: 992px) {{
+      .stats-grid {{ grid-template-columns: repeat(2, 1fr); }}
+    }}
+    @media (max-width: 768px) {{
+      :root {{
+        --sidebar-w: 0px;
+      }}
+      .torbox-sidebar {{
+        position: fixed;
+        inset: 0 auto 0 0;
+        transform: translateX(-100%);
+      }}
+      .torbox-sidebar.open {{
+        transform: translateX(0);
+      }}
+      .hamburger-btn {{
+        display: inline-flex;
+      }}
+      .mobile-close-btn {{
+        display: block;
+      }}
+      .topbar-header {{
+        padding: 0 16px;
+      }}
+      main {{
+        padding: 16px 12px 70px;
+      }}
+      .stats-grid {{
+        grid-template-columns: 1fr !important;
+        gap: 10px !important;
+      }}
+      .content-footer {{
+        left: 50%;
+        width: calc(100% - 24px);
+        max-width: 100%;
+      }}
+    }}
+  </style>
+</head>
+<body style="display: flex; flex-direction: row; min-height: 100vh; overflow: hidden; background-color: var(--bg);">
+
+  <!-- Mobile Overlay Backdrop -->
+  <div id="sidebarBackdrop" onclick="toggleSidebar(false)" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); z-index: 90;"></div>
+
+  <!-- CLARAOS SUITE SIDEBAR -->
+  <aside id="appSidebar" class="torbox-sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="5" cy="19" r="1.5" fill="currentColor"/>
+          <path d="M4 4a16 16 0 0 1 16 16"/>
+          <path d="M4 11a9 9 0 0 1 9 9"/>
+        </svg>
+      </div>
+      <div style="min-width: 0;">
+        <div class="brand-title">RSS Hub</div>
+        <div class="brand-sub">ClaraOS Feed Engine</div>
+      </div>
+      <button class="mobile-close-btn" onclick="toggleSidebar(false)">✕</button>
+    </div>
+
+    <!-- Navigation items -->
+    <nav class="sidebar-nav">
+      <div class="nav-section-title">ĐIỀU HƯỚNG FEEDS</div>
+      <a href="/" class="nav-item active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/></svg>
+        <span>Danh sách Feeds</span>
+      </a>
+      <a href="#bookthreads" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        <span>Sách &amp; Ebooks</span>
+      </a>
+      <a href="javascript:void(0)" onclick="refreshFeed('bookthreads', document.getElementById('btnRefreshAll'))" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+        <span>Cào mới tức thì</span>
+      </a>
+
+      <div class="nav-section-title" style="margin-top: 14px;">HỆ THỐNG CLARAOS</div>
+      <a href="{CLARAOS_URL}" target="_blank" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span>ClaraOS Portal</span>
+      </a>
+      <a href="https://debrid.data1box.win" target="_blank" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <span>Debrid Manager</span>
+      </a>
+    </nav>
+
+    <!-- Sidebar Telemetry Badges -->
+    <div class="sidebar-telemetry">
+      <div class="badge green" style="flex: 1; justify-content: center;" title="Gateway: Online">
+        <span class="dot"></span>
+        <span>Gateway</span>
+      </div>
+      <div class="badge cyan" style="flex: 1; justify-content: center;" title="Port: 8098">
+        <span class="dot"></span>
+        <span>Port 8098</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN SCROLLABLE VIEWPORT -->
+  <div class="torbox-main-viewport">
+    <header class="topbar-header">
+      <div style="display: flex; align-items: center; gap: 14px; min-width: 0;">
+        <button class="hamburger-btn" onclick="toggleSidebar(true)">☰</button>
+        <h1 class="page-title">Kênh Feed &amp; Tự Động Hóa</h1>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
+        <button id="btnRefreshAll" class="btn primary" onclick="refreshFeed('bookthreads', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+          <span>Làm mới tất cả</span>
+        </button>
+        <a class="btn" href="{CLARAOS_URL}" target="_blank" title="Về ClaraOS Portal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          <span>ClaraOS</span>
+        </a>
+      </div>
+    </header>
+
+    <main>
+      <!-- Stats Grid (Suite Template) -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-card-icon stat-blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="19" r="1.5"/><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/></svg>
+          </div>
+          <div class="stat-info">
+            <div class="label">Tổng số Feed</div>
+            <div class="val">1 Kênh</div>
+            <div class="desc">Threads &amp; Ebooks VN</div>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-card-icon stat-emerald">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          </div>
+          <div class="stat-info">
+            <div class="label">Bài viết đã cào</div>
+            <div class="val">{total_posts} Bài</div>
+            <div class="desc">Phân loại Ebook Drive</div>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-card-icon stat-violet">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <div class="stat-info">
+            <div class="label">Chu kỳ quét</div>
+            <div class="val">{SCRAPE_INTERVAL_MINUTES} Phút</div>
+            <div class="desc">Tự động chạy ngầm</div>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-card-icon stat-amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          </div>
+          <div class="stat-info">
+            <div class="label">Public Gateway</div>
+            <div class="val">Online</div>
+            <div class="desc">rss.data1box.win</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls Bar & Filter Pills (Standardized Suite Template) -->
+      <div class="controls-bar">
+        <div class="filter-pills">
+          <button class="pill active" onclick="filterFeeds('all', this)">
+            <span>Tất cả Feeds</span>
+            <span class="pill-count">1</span>
+          </button>
+          <button class="pill" onclick="filterFeeds('books', this)">
+            <span>Sách &amp; Ebooks</span>
+            <span class="pill-count">1</span>
+          </button>
+          <button class="pill" onclick="filterFeeds('threads', this)">
+            <span>Threads VN</span>
+            <span class="pill-count">1</span>
+          </button>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <button class="btn" onclick="copyLink('{BASE_URL}/bookthreads.xml', this)" title="Sao chép link RSS 2.0 nhanh">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            <span>Sao chép RSS URL</span>
+          </button>
+          <button class="btn" onclick="location.reload()" title="Làm mới trang">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Task / Feeds List -->
+      <div id="viewFeeds" class="task-list">
+        {feed_cards}
+      </div>
+
+      <!-- Quick Ecosystem Guide Box -->
+      <div style="margin-top: 24px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; padding: 20px; backdrop-filter: blur(12px);">
+        <div style="display: flex; align-items: flex-start; gap: 14px;">
+          <div style="width: 40px; height: 40px; border-radius: 10px; background: rgba(14, 165, 233, 0.15); border: 1px solid rgba(14, 165, 233, 0.3); display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: #38bdf8;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.6;">
+            <div style="font-size: 0.92rem; font-weight: 700; color: #fff; margin-bottom: 4px;">Hướng dẫn tích hợp ClaraOS RSS Engine</div>
+            <div>&bull; <strong>Dành cho app đọc tin (Feedly, NetNewsWire, Miniflux):</strong> Dùng URL định dạng <code style="font-family: var(--mono); color: #fbbf24; background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 6px;">.xml</code> hoặc <code style="font-family: var(--mono); color: #c084fc; background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 6px;">.atom</code>.</div>
+            <div>&bull; <strong>Dành cho Automation (n8n, Bot Telegram, Cron Script):</strong> Dùng URL định dạng <code style="font-family: var(--mono); color: #38bdf8; background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 6px;">.json</code> (chuẩn JSON Feed v1.1 RFC).</div>
+            <div>&bull; <strong>Bộ lọc Ebook thông minh:</strong> Tự động phân tích metadata, phát hiện link Google Drive và tệp sách .epub / .pdf kèm badge nhận diện.</div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Floating Dock Footer (Standardized Suite Template) -->
+    <div class="content-footer">
+      <div class="footer-stats-strip">
+        <div class="footer-stat-chip chip-cyan">
+          <span class="chip-label">Kênh:</span>
+          <span class="chip-val">1 Active</span>
+        </div>
+        <div class="footer-stat-chip chip-emerald">
+          <span class="chip-label">Bài viết:</span>
+          <span class="chip-val">{total_posts}</span>
+        </div>
+        <div class="footer-stat-chip chip-amber">
+          <span class="chip-label">Tần suất:</span>
+          <span class="chip-val">{SCRAPE_INTERVAL_MINUTES}m</span>
+        </div>
+        <div class="footer-stat-chip chip-violet">
+          <span class="chip-label">Gateway:</span>
+          <span class="chip-val">rss.data1box.win</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px; color: #34d399;"><polyline points="20 6 9 17 4 12"/></svg>
+    <span id="toastMsg">Đã sao chép liên kết vào bộ nhớ tạm!</span>
+  </div>
+
+  <script>
+    function showToast(msg, isError = false) {{
+      const t = document.getElementById('toast');
+      const m = document.getElementById('toastMsg');
+      m.innerText = msg;
+      if (isError) {{
+        t.classList.add('error');
+      }} else {{
+        t.classList.remove('error');
+      }}
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2500);
+    }}
+
+    function copyLink(url, btn) {{
+      navigator.clipboard.writeText(url).then(() => {{
+        showToast('Đã chép: ' + url);
+        if (btn) {{
+          const orig = btn.innerHTML;
+          btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; color: #34d399;"><polyline points="20 6 9 17 4 12"/></svg><span>Đã chép</span>';
+          setTimeout(() => btn.innerHTML = orig, 1800);
+        }}
+      }}).catch(() => {{
+        showToast('Không thể sao chép!', true);
+      }});
+    }}
+
+    function refreshFeed(tag, btn) {{
+      if (btn) {{
+        btn.dataset.origHtml = btn.innerHTML;
+        btn.innerHTML = '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 15px; height: 15px; animation: spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>Đang cào...</span>';
+        btn.disabled = true;
+      }}
+      fetch('/api/refresh/' + tag)
+        .then(r => r.json())
+        .then(d => {{
+          showToast('Đã cào mới thành công: ' + d.count + ' bài viết');
+          if (btn) {{
+            btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 15px; height: 15px; color: #34d399;"><polyline points="20 6 9 17 4 12"/></svg><span>Xong (' + d.count + ')</span>';
+          }}
+          setTimeout(() => location.reload(), 1000);
+        }})
+        .catch(e => {{
+          showToast('Lỗi khi cào dữ liệu: ' + e, true);
+          if (btn && btn.dataset.origHtml) {{
+            btn.innerHTML = btn.dataset.origHtml;
+            btn.disabled = false;
+          }}
+        }});
+    }}
+
+    function toggleSidebar(open) {{
+      const sb = document.getElementById('appSidebar');
+      const bd = document.getElementById('sidebarBackdrop');
+      if (open) {{
+        sb.classList.add('open');
+        bd.style.display = 'block';
+      }} else {{
+        sb.classList.remove('open');
+        bd.style.display = 'none';
+      }}
+    }}
+
+    function filterFeeds(cat, pill) {{
+      document.querySelectorAll('.filter-pills .pill').forEach(p => p.classList.remove('active'));
+      if (pill) pill.classList.add('active');
+    }}
+  </script>
+  <style>
+    @keyframes spin {{ 100% {{ transform: rotate(360deg); }} }}
+  </style>
+</body>
+</html>
+"""
     return HTMLResponse(content=html_content)
 
 @app.get("/{path:path}")
