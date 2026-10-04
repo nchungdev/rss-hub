@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 
 def generate_json_feed(tag: str, posts: list, base_url: str = "https://rss.data1box.win", feed_meta: dict = None) -> dict:
     feed_title = (feed_meta or {}).get("title") or f"Feed - #{tag}"
-    feed_link = (feed_meta or {}).get("site_url") or f"https://www.threads.com/search?q={tag}&serp_type=tags"
+    feed_target = (feed_meta or {}).get("target", "")
+    feed_link = (feed_meta or {}).get("site_url") or (feed_target if feed_target.startswith("http") else "") or f"{base_url}/{tag}"
     feed_self = f"{base_url}/{tag}.json"
     feed_desc = (feed_meta or {}).get("description") or f"Các bài viết mới nhất từ {feed_title}"
 
@@ -27,7 +28,19 @@ def generate_json_feed(tag: str, posts: list, base_url: str = "https://rss.data1
         if gdrive_links or (preview_title and any(ext in preview_title.lower() for ext in ['.epub', '.pdf', '.mobi', '.azw'])):
             prefix = "[Ebook] "
         
-        item_title = f"{prefix}@{username}: {first_line}"
+        if preview_title:
+            item_title = f"{prefix}{preview_title}"
+        elif username and not ("." in username or username.startswith("http")):
+            item_title = f"{prefix}@{username}: {first_line}"
+        else:
+            item_title = f"{prefix}{first_line}"
+
+        if username.startswith("http") or "." in username:
+            author_url = f"https://{username}" if not username.startswith("http") else username
+            author_name = username
+        else:
+            author_url = f"https://www.threads.net/@{username}"
+            author_name = f"@{username}"
 
         # HTML Content
         html_desc_parts = []
@@ -38,7 +51,7 @@ def generate_json_feed(tag: str, posts: list, base_url: str = "https://rss.data1
                 label = preview_title or "Tải Ebook từ Google Drive"
                 html_desc_parts.append(f'<p style="margin:4px 0;"><a href="{glink}" target="_blank" style="color:#0d6efd; font-weight:bold;">📥 {label}</a></p>')
             html_desc_parts.append('</div>')
-        elif preview_title:
+        elif preview_title and preview_title != first_line:
             html_desc_parts.append('<div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:6px; padding:8px; margin:8px 0;">')
             html_desc_parts.append(f'<strong>🔗 Đính kèm:</strong> {preview_title}')
             html_desc_parts.append('</div>')
@@ -50,7 +63,7 @@ def generate_json_feed(tag: str, posts: list, base_url: str = "https://rss.data1
         for img in images:
             html_desc_parts.append(f'<p><img src="{img}" style="max-width:100%; height:auto;" /></p>')
 
-        html_desc_parts.append(f'<p><a href="{post_url}" target="_blank" style="color:#555;">🔗 Xem bài viết trên Threads</a></p>')
+        html_desc_parts.append(f'<p><a href="{post_url}" target="_blank" style="color:#555;">🔗 Xem bài viết gốc</a></p>')
         content_html = "".join(html_desc_parts)
 
         item = {
@@ -61,8 +74,8 @@ def generate_json_feed(tag: str, posts: list, base_url: str = "https://rss.data1
             "content_html": content_html,
             "date_published": iso_date,
             "author": {
-                "name": f"@{username}",
-                "url": f"https://www.threads.com/@{username}"
+                "name": author_name,
+                "url": author_url
             },
             "tags": [tag]
         }

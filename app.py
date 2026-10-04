@@ -114,7 +114,7 @@ async def api_create_or_update_feed(request: Request):
         raise HTTPException(status_code=400, detail="Định danh slug không hợp lệ (chỉ chấp nhận chữ cái, số, gạch ngang)")
     
     title = data.get("title", "").strip() or slug
-    feed_type = data.get("type", "threads")
+    feed_type = data.get("type", "web")
     target = data.get("target", "").strip() or slug
     category = data.get("category", "Chung").strip() or "Chung"
     description = data.get("description", "").strip()
@@ -143,6 +143,9 @@ async def api_create_or_update_feed(request: Request):
         cookie_mode = "profile"
         cookie_profile = p_id
 
+    use_flaresolverr = bool(data.get("use_flaresolverr", False))
+    selectors = data.get("selectors", {})
+
     feeds = load_feeds()
     feeds[slug] = {
         "slug": slug,
@@ -154,6 +157,8 @@ async def api_create_or_update_feed(request: Request):
         "cookie_mode": cookie_mode,
         "cookie_profile": cookie_profile,
         "cookie": cookie,
+        "use_flaresolverr": use_flaresolverr,
+        "selectors": selectors,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     save_feeds(feeds)
@@ -200,10 +205,21 @@ async def dashboard(request: Request):
         count = len(posts)
         total_posts += count
         
-        feed_type = meta.get("type", "threads")
-        type_badge = "THREADS"
-        if feed_type == "rsshub": type_badge = "RSSHUB"
-        elif feed_type == "custom_rss": type_badge = "EXTERNAL RSS"
+        feed_type = meta.get("type", "web")
+        type_badge = "WEB SCRAPER"
+        icon_svg = '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'
+        if feed_type == "web":
+            type_badge = "WEB SCRAPER"
+            icon_svg = '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'
+        elif feed_type == "threads":
+            type_badge = "THREADS"
+            icon_svg = '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'
+        elif feed_type == "rsshub":
+            type_badge = "RSSHUB"
+            icon_svg = '<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>'
+        elif feed_type == "custom_rss":
+            type_badge = "EXTERNAL RSS"
+            icon_svg = '<path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/>'
 
         # Cookie Mode Badge
         cookie_mode = meta.get("cookie_mode", "none")
@@ -221,20 +237,20 @@ async def dashboard(request: Request):
         # Recent items preview
         preview_items_html = ""
         for p in posts[:3]:
-            user = p.get("username", "user")
-            raw_text = p.get("text", "").strip()
-            first_line = raw_text.split("\n")[0][:110] if raw_text else "Bài viết không có tiêu đề"
+            user = p.get("username", "web")
+            first_line = p.get("preview_title") or (p.get("text", "").split("\n")[0][:110] if p.get("text") else "Bài viết không có tiêu đề")
             gdrive = p.get("gdrive_links", [])
             badge = '<span class="badge cyan" style="padding: 2px 8px; font-size: 0.68rem;"><span class="dot"></span> Ebook Drive</span>' if gdrive else ""
+            item_url = p.get("url", "#")
             
             preview_items_html += f"""
             <div style="background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 4px;">
                 <div style="display: flex; align-items: center; justify-content: space-between;">
-                    <span style="font-weight: 600; font-size: 0.75rem; color: #38bdf8;">@{user}</span>
+                    <a href="{item_url}" target="_blank" rel="noopener noreferrer" style="font-weight: 600; font-size: 0.75rem; color: #38bdf8; text-decoration: none; max-width: 80%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">🌐 {user}</a>
                     {badge}
                 </div>
                 <div style="color: var(--text-muted); font-size: 0.76rem; line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">
-                    {first_line}...
+                    {first_line}
                 </div>
             </div>
             """
@@ -245,8 +261,7 @@ async def dashboard(request: Request):
                 <div style="display: flex; align-items: center; gap: 14px;">
                     <div class="brand-icon" style="background: linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(99, 102, 241, 0.25)); border: 1px solid rgba(14, 165, 233, 0.3);">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 22px; height: 22px; color: #38bdf8;">
-                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                            {icon_svg}
                         </svg>
                     </div>
                     <div>
@@ -1135,7 +1150,7 @@ async def dashboard(request: Request):
           <div class="stat-info">
             <div class="label">Tổng số Feed</div>
             <div class="val">{len(feeds)} Kênh</div>
-            <div class="desc">Threads, RSSHub, URLs</div>
+            <div class="desc">Web, Threads, RSSHub</div>
           </div>
         </div>
 
@@ -1223,44 +1238,81 @@ async def dashboard(request: Request):
   <div id="modalAdd" class="modal-overlay" onclick="handleModalClick(event, 'modalAdd')">
     <div class="modal-card">
       <div class="modal-head">
-        <h2 class="modal-title">Cấu hình Kênh RSS Mới</h2>
+        <h2 class="modal-title">Tạo Kênh RSS Mới (Universal Feed Generator)</h2>
         <button class="modal-close" onclick="closeModal('modalAdd')">✕</button>
       </div>
 
       <form id="formAddFeed" onsubmit="handleSaveFeed(event)">
+        <!-- 1. CHỌN LOẠI NGUỒN CÀO (SCRAPER ENGINE) -->
+        <div class="form-group">
+          <label class="form-label">Loại nguồn cào (Scraper Engine) *</label>
+          <select id="feedType" class="form-select" onchange="handleTypeChange(this.value)" style="font-weight: 600; font-size: 0.85rem;">
+            <option value="web" selected>🌐 Cào Trang Web Bất Kỳ (Generic Web Scraper - Tin tức, Diễn đàn, Blog...)</option>
+            <option value="threads">🧵 Mạng xã hội Threads (Hashtag, Từ khóa hoặc Profile)</option>
+            <option value="rsshub">🚀 Tuyến đường RSSHub Upstream (1000+ routes có sẵn)</option>
+            <option value="custom_rss">📡 Đồng bộ URL RSS / Atom ngoài (External Feed)</option>
+          </select>
+          <div class="form-hint" id="hintEngine">Biến bất kỳ website, diễn đàn (Voz, Tinhte...), báo chí hay blog nào thành RSS chuẩn hóa.</div>
+        </div>
+
+        <!-- 2. MỤC TIÊU NGUỒN (TARGET URL / PARAM) -->
+        <div class="form-group">
+          <label class="form-label" id="lblTarget">Địa chỉ URL Trang web cần cào *</label>
+          <input type="text" id="feedTarget" class="form-input" required placeholder="vd: https://tuoitre.vn/cong-nghe.htm, https://voz.vn/f/chuyen-tro-linh-tinh.17/" oninput="autoGuessWebsite(this.value)">
+          <div class="form-hint" id="hintTarget">Nhập URL trang web. Hệ thống tự động phân tích HTML và bóc tách các bài viết mới thành RSS.</div>
+        </div>
+
+        <!-- 2.1 TÙY CHỌN NÂNG CAO CHO WEB SCRAPER -->
+        <div id="sectionWebAdvanced" style="margin-bottom: 16px; padding: 12px 14px; background: rgba(7, 12, 24, 0.7); border: 1px solid var(--card-border); border-radius: 12px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <span style="font-size: 0.76rem; font-weight: 700; color: #38bdf8;">⚙️ Tùy chỉnh CSS Selectors (Không bắt buộc)</span>
+            <span style="font-size: 0.68rem; color: var(--text-dim);">Để trống để dùng Smart Auto-Detect</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div>
+              <label style="font-size: 0.68rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Item Container Selector</label>
+              <input type="text" id="selItem" class="form-input" placeholder="vd: .structItem--thread, article" style="font-size: 0.75rem; height: 32px; font-family: var(--mono);">
+            </div>
+            <div>
+              <label style="font-size: 0.68rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Title Selector</label>
+              <input type="text" id="selTitle" class="form-input" placeholder="vd: .title, h2, a" style="font-size: 0.75rem; height: 32px; font-family: var(--mono);">
+            </div>
+            <div>
+              <label style="font-size: 0.68rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Link Selector</label>
+              <input type="text" id="selLink" class="form-input" placeholder="vd: a, h2 a" style="font-size: 0.75rem; height: 32px; font-family: var(--mono);">
+            </div>
+            <div>
+              <label style="font-size: 0.68rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Summary/Desc Selector</label>
+              <input type="text" id="selDesc" class="form-input" placeholder="vd: .summary, p" style="font-size: 0.75rem; height: 32px; font-family: var(--mono);">
+            </div>
+          </div>
+          <div style="margin-top: 10px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.76rem; color: var(--text-muted); cursor: pointer;">
+              <input type="checkbox" id="chkUseFlareSolverr">
+              <span>🛡️ Sử dụng FlareSolverr (Vượt Cloudflare Turnstile / Bot Protection nếu trang web bị chặn)</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 3. THÔNG TIN HIỂN THỊ CỦA FEED -->
         <div class="form-group">
           <label class="form-label">Tên hiển thị kênh (Title) *</label>
-          <input type="text" id="feedTitle" class="form-input" required placeholder="Ví dụ: Tin tức Công nghệ Threads, VnExpress Mới, ..." oninput="autoGenerateSlug(this.value)">
+          <input type="text" id="feedTitle" class="form-input" required placeholder="Ví dụ: Công nghệ Tuổi Trẻ, Voz Trò Chuyện Linh Tinh, ..." oninput="autoGenerateSlug(this.value)">
         </div>
 
         <div class="form-group">
           <label class="form-label">Định danh URL (Slug) *</label>
           <div style="display:flex; align-items:center; gap:8px;">
             <span style="font-size:0.75rem; color:var(--text-dim); font-family:var(--mono);">{BASE_URL}/</span>
-            <input type="text" id="feedSlug" class="form-input" required placeholder="congnghe" style="font-family:var(--mono);">
+            <input type="text" id="feedSlug" class="form-input" required placeholder="cong-nghe" style="font-family:var(--mono);">
             <span style="font-size:0.75rem; color:var(--text-dim); font-family:var(--mono);">.xml / .json</span>
           </div>
           <div class="form-hint">Chỉ gồm chữ cái viết thường không dấu, số và gạch ngang (a-z, 0-9, -).</div>
         </div>
 
         <div class="form-group">
-          <label class="form-label">Loại nguồn cào (Source Type) *</label>
-          <select id="feedType" class="form-select" onchange="handleTypeChange(this.value)">
-            <option value="threads">Threads.net (Hashtag hoặc từ khóa)</option>
-            <option value="rsshub">RSSHub Upstream Route (Hệ thống RSSHub)</option>
-            <option value="custom_rss">URL RSS / Atom ngoài (Website, Báo chí, Blog)</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" id="lblTarget">Từ khóa Hashtag trên Threads *</label>
-          <input type="text" id="feedTarget" class="form-input" required placeholder="vd: congnghe, reviewphim, kinhte, manga" oninput="autoGuessWebsite(this.value)">
-          <div class="form-hint" id="hintTarget">Nhập hashtag hoặc từ khóa cần tìm kiếm và tạo RSS trên mạng xã hội Threads.</div>
-        </div>
-
-        <div class="form-group">
           <label class="form-label">Thể loại / Chuyên mục (Category)</label>
-          <input type="text" id="feedCategory" class="form-input" placeholder="vd: Công nghệ, Tin tức, Sách &amp; Ebooks, Giải trí">
+          <input type="text" id="feedCategory" class="form-input" placeholder="vd: Công nghệ, Tin tức, Diễn đàn, Sách &amp; Ebooks, Giải trí">
         </div>
 
         <div class="form-group">
@@ -1268,7 +1320,7 @@ async def dashboard(request: Request):
           <textarea id="feedDesc" class="form-textarea" rows="2" placeholder="Mô tả nội dung kênh feed này..."></textarea>
         </div>
 
-        <!-- Cookie Configuration Section per Scraper -->
+        <!-- 4. CẤU HÌNH COOKIE XÁC THỰC CHO SCRAPER -->
         <div style="background: rgba(7, 12, 24, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; margin-bottom: 16px;">
           <div class="form-group" style="margin-bottom: 10px;">
             <label class="form-label" style="display:flex; align-items:center; justify-content:space-between;">
@@ -1299,8 +1351,8 @@ async def dashboard(request: Request):
                 <span style="color: var(--text-muted); font-weight: 500;">Lưu cookie này vào Kho để các Scraper khác của trang web này tái sử dụng</span>
               </label>
               <div id="wrapProfileName" style="display: none; margin-top: 8px; gap: 8px;">
-                <input type="text" id="vaultProfileName" class="form-input" placeholder="Đặt tên bộ cookie (vd: Threads Acc 2, Voz VIP)" style="flex:1;">
-                <input type="text" id="vaultWebsite" class="form-input" placeholder="Trang web / Domain (vd: threads.net, voz.vn)" style="flex:1;">
+                <input type="text" id="vaultProfileName" class="form-input" placeholder="Đặt tên bộ cookie (vd: Voz VIP, Tuổi Trẻ Member)" style="flex:1;">
+                <input type="text" id="vaultWebsite" class="form-input" placeholder="Trang web / Domain (vd: voz.vn, tuoitre.vn)" style="flex:1;">
               </div>
             </div>
           </div>
@@ -1504,10 +1556,19 @@ async def dashboard(request: Request):
       const feedType = document.getElementById('feedType').value;
       if (feedType === 'threads') {{
         if (vw) vw.value = 'threads.net';
-      }} else if (val.startsWith('http')) {{
+      }} else if (val.startsWith('http://') || val.startsWith('https://')) {{
         try {{
           const u = new URL(val);
-          if (vw) vw.value = u.hostname;
+          if (vw) vw.value = u.hostname.replace(/^www\./, '');
+          const titleInp = document.getElementById('feedTitle');
+          if (!titleInp.value) {{
+            let hostParts = u.hostname.replace(/^www\./, '').split('.');
+            let siteName = hostParts[0].charAt(0).toUpperCase() + hostParts[0].slice(1);
+            let pathParts = u.pathname.split('/').filter(Boolean);
+            let sub = pathParts.length > 0 ? ' - ' + pathParts[pathParts.length - 1].replace(/[-_.]/g, ' ') : '';
+            titleInp.value = siteName + sub;
+            autoGenerateSlug(titleInp.value);
+          }}
         }} catch(e) {{}}
       }}
     }}
@@ -1517,21 +1578,37 @@ async def dashboard(request: Request):
       const hint = document.getElementById('hintTarget');
       const inp = document.getElementById('feedTarget');
       const vw = document.getElementById('vaultWebsite');
+      const hintEngine = document.getElementById('hintEngine');
+      const secWeb = document.getElementById('sectionWebAdvanced');
 
-      if (val === 'threads') {{
-        lbl.innerText = 'Từ khóa / Hashtag Threads *';
-        inp.placeholder = 'vd: congnghe, reviewphim, kinhte, manga';
-        hint.innerText = 'Nhập hashtag hoặc từ khóa cần cào và lọc link Ebook trên Threads.';
+      if (val === 'web') {{
+        lbl.innerText = 'Địa chỉ URL Trang web cần cào *';
+        inp.placeholder = 'vd: https://tuoitre.vn/cong-nghe.htm, https://voz.vn/f/chuyen-tro-linh-tinh.17/';
+        hint.innerText = 'Nhập URL trang web. Hệ thống tự động phân tích HTML và bóc tách các bài viết mới thành RSS.';
+        if (hintEngine) hintEngine.innerText = 'Biến bất kỳ website, diễn đàn (Voz, Tinhte...), báo chí hay blog nào thành RSS chuẩn hóa.';
+        if (secWeb) secWeb.style.display = 'block';
+        if (inp.value) autoGuessWebsite(inp.value);
+      }} else if (val === 'threads') {{
+        lbl.innerText = 'Hashtag, Từ khóa hoặc Profile Threads *';
+        inp.placeholder = 'vd: bookthreads, congnghe, @nguyetminh6080';
+        hint.innerText = 'Cào các bài đăng mới nhất trên Threads.net theo từ khóa, hashtag hoặc trang cá nhân.';
+        if (hintEngine) hintEngine.innerText = 'Cào chuyên biệt từ mạng xã hội Threads (hỗ trợ hashtag, tài khoản và lọc link Ebook Drive).';
+        if (secWeb) secWeb.style.display = 'none';
         if (vw) vw.value = 'threads.net';
       }} else if (val === 'rsshub') {{
-        lbl.innerText = 'Route RSSHub Upstream *';
+        lbl.innerText = 'Tuyến đường Route RSSHub Upstream *';
         inp.placeholder = 'vd: telegram/channel/duongdancity, bilibili/ranking/0/3';
-        hint.innerText = 'Nhập đường dẫn route được hỗ trợ bởi hệ thống RSSHub.';
+        hint.innerText = 'Nhập tuyến đường RSSHub được hỗ trợ bởi hệ sinh thái RSSHub.';
+        if (hintEngine) hintEngine.innerText = 'Tận dụng hơn 1000+ tuyến đường tích hợp sẵn của RSSHub upstream.';
+        if (secWeb) secWeb.style.display = 'none';
         if (vw) vw.value = 'rsshub';
       }} else if (val === 'custom_rss') {{
-        lbl.innerText = 'Đường dẫn URL RSS / Atom ngoài *';
+        lbl.innerText = 'Địa chỉ URL Feed RSS / Atom ngoài *';
         inp.placeholder = 'vd: https://vnexpress.net/rss/tin-moi-nhat.rss';
-        hint.innerText = 'Nhập địa chỉ URL RSS/Atom của bất kỳ website hoặc báo chí nào.';
+        hint.innerText = 'Nhập địa chỉ URL RSS/Atom của bất kỳ website hoặc báo chí nào để quản lý tập trung.';
+        if (hintEngine) hintEngine.innerText = 'Đồng bộ và quản lý tập trung một URL RSS/Atom có sẵn.';
+        if (secWeb) secWeb.style.display = 'none';
+        if (inp.value) autoGuessWebsite(inp.value);
       }}
     }}
 
@@ -1602,7 +1679,7 @@ async def dashboard(request: Request):
         inpId.value = '';
         inpName.value = '';
         inpWeb.value = '';
-        selType.value = 'threads';
+        selType.value = 'web';
         txtCookie.value = '';
         txtCookie.placeholder = 'sessionid=...; token=...; hoặc dán JSON từ Cookie-Editor';
         txtCookie.required = true;
@@ -1713,6 +1790,17 @@ async def dashboard(request: Request):
       btn.disabled = true;
       btn.innerHTML = '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px; animation:spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>Đang lưu...</span>';
 
+      const selItem = document.getElementById('selItem') ? document.getElementById('selItem').value.trim() : '';
+      let selectors = null;
+      if (selItem) {{
+        selectors = {{
+          item_selector: selItem,
+          title_selector: document.getElementById('selTitle') ? document.getElementById('selTitle').value.trim() : '',
+          link_selector: document.getElementById('selLink') ? document.getElementById('selLink').value.trim() : '',
+          desc_selector: document.getElementById('selDesc') ? document.getElementById('selDesc').value.trim() : ''
+        }};
+      }}
+
       const payload = {{
         title: document.getElementById('feedTitle').value.trim(),
         slug: document.getElementById('feedSlug').value.trim(),
@@ -1725,7 +1813,9 @@ async def dashboard(request: Request):
         cookie: document.getElementById('feedCookieCustom').value.trim(),
         save_to_vault: document.getElementById('chkSaveToVault').checked,
         vault_profile_name: document.getElementById('vaultProfileName').value.trim(),
-        vault_website: document.getElementById('vaultWebsite').value.trim()
+        vault_website: document.getElementById('vaultWebsite').value.trim(),
+        use_flaresolverr: document.getElementById('chkUseFlareSolverr') ? document.getElementById('chkUseFlareSolverr').checked : false,
+        selectors: selectors
       }};
 
       fetch('/api/feeds', {{

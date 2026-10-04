@@ -186,11 +186,12 @@ def format_cookie_headers(cookie_raw: str) -> str:
     return cookie_raw
 
 from scrapers.cookie_vault import resolve_effective_cookie
+from scrapers.generic_web import scrape_generic_web
 
 def get_feed_posts(slug: str, force_refresh: bool = False) -> list:
     feeds = load_feeds()
     meta = feeds.get(slug, {})
-    feed_type = meta.get("type", "threads")
+    feed_type = meta.get("type", "web")
     target = meta.get("target", slug)
     cookie = resolve_effective_cookie(meta)
 
@@ -211,6 +212,19 @@ def get_feed_posts(slug: str, force_refresh: bool = False) -> list:
         except Exception:
             pass
 
+    # Generic Web Scraper (HTML to RSS)
+    if feed_type in ("web", "generic_web"):
+        selectors = meta.get("selectors")
+        use_flaresolverr = meta.get("use_flaresolverr", False)
+        posts = scrape_generic_web(target, custom_cookie=cookie, selectors=selectors, use_flaresolverr=use_flaresolverr)
+        if posts:
+            try:
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(posts, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                logger.error(f"Failed to cache feed {slug}: {e}")
+            return posts
+
     # For RSSHub and Custom RSS
     url = target
     if feed_type == "rsshub":
@@ -219,7 +233,7 @@ def get_feed_posts(slug: str, force_refresh: bool = False) -> list:
 
     logger.info(f"Fetching feed [{slug}] type={feed_type} from {url}...")
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
     }
     if cookie:
         formatted_cookie = format_cookie_headers(cookie)
@@ -227,7 +241,7 @@ def get_feed_posts(slug: str, force_refresh: bool = False) -> list:
         logger.info(f"Attached custom authentication cookie to feed [{slug}] request")
 
     try:
-        with httpx.Client(timeout=25.0, headers=headers) as client:
+        with httpx.Client(timeout=25.0, headers=headers, follow_redirects=True) as client:
             resp = client.get(url)
             if resp.status_code == 200:
                 posts = parse_xml_feed(resp.text)

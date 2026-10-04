@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 
 def generate_atom_xml(tag: str, posts: list, base_url: str = "https://rss.data1box.win", feed_meta: dict = None) -> str:
     feed_title = (feed_meta or {}).get("title") or f"Feed - #{tag}"
-    feed_link = (feed_meta or {}).get("site_url") or f"https://www.threads.com/search?q={tag}&amp;serp_type=tags"
+    feed_target = (feed_meta or {}).get("target", "")
+    feed_link = (feed_meta or {}).get("site_url") or (feed_target if feed_target.startswith("http") else "") or f"{base_url}/{tag}"
     feed_self = f"{base_url}/{tag}.atom"
     now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -36,7 +37,19 @@ def generate_atom_xml(tag: str, posts: list, base_url: str = "https://rss.data1b
         if gdrive_links or (preview_title and any(ext in preview_title.lower() for ext in ['.epub', '.pdf', '.mobi', '.azw'])):
             prefix = "[Ebook] "
         
-        item_title = f"{prefix}@{username}: {first_line}"
+        if preview_title:
+            item_title = f"{prefix}{preview_title}"
+        elif username and not ("." in username or username.startswith("http")):
+            item_title = f"{prefix}@{username}: {first_line}"
+        else:
+            item_title = f"{prefix}{first_line}"
+
+        if username.startswith("http") or "." in username:
+            author_url = f"https://{username}" if not username.startswith("http") else username
+            author_name = username
+        else:
+            author_url = f"https://www.threads.net/@{username}"
+            author_name = f"@{username}"
 
         html_desc_parts = []
         if gdrive_links:
@@ -46,7 +59,7 @@ def generate_atom_xml(tag: str, posts: list, base_url: str = "https://rss.data1b
                 label = preview_title or "Tải Ebook từ Google Drive"
                 html_desc_parts.append(f'<p style="margin:4px 0;"><a href="{html.escape(glink)}" target="_blank" style="color:#0d6efd; font-weight:bold;">📥 {html.escape(label)}</a></p>')
             html_desc_parts.append('</div>')
-        elif preview_title:
+        elif preview_title and preview_title != first_line:
             html_desc_parts.append('<div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:6px; padding:8px; margin:8px 0;">')
             html_desc_parts.append(f'<strong>🔗 Đính kèm:</strong> {html.escape(preview_title)}')
             html_desc_parts.append('</div>')
@@ -58,7 +71,7 @@ def generate_atom_xml(tag: str, posts: list, base_url: str = "https://rss.data1b
         for img in images:
             html_desc_parts.append(f'<p><img src="{html.escape(img)}" style="max-width:100%; height:auto;" /></p>')
 
-        html_desc_parts.append(f'<p><a href="{post_url}" target="_blank" style="color:#555;">🔗 Xem bài viết trên Threads</a></p>')
+        html_desc_parts.append(f'<p><a href="{post_url}" target="_blank" style="color:#555;">🔗 Xem bài viết gốc</a></p>')
         item_desc = "".join(html_desc_parts)
 
         xml_lines.append('  <entry>')
@@ -67,8 +80,8 @@ def generate_atom_xml(tag: str, posts: list, base_url: str = "https://rss.data1b
         xml_lines.append(f'    <id>{post_url}</id>')
         xml_lines.append(f'    <updated>{post_iso}</updated>')
         xml_lines.append('    <author>')
-        xml_lines.append(f'      <name>@{html.escape(username)}</name>')
-        xml_lines.append(f'      <uri>https://www.threads.com/@{html.escape(username)}</uri>')
+        xml_lines.append(f'      <name>{html.escape(author_name)}</name>')
+        xml_lines.append(f'      <uri>{html.escape(author_url)}</uri>')
         xml_lines.append('    </author>')
         xml_lines.append(f'    <content type="html"><![CDATA[{item_desc}]]></content>')
         xml_lines.append('  </entry>')

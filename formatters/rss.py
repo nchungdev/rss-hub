@@ -4,7 +4,8 @@ from email.utils import format_datetime
 
 def generate_rss_xml(tag: str, posts: list, base_url: str = "https://rss.data1box.win", feed_meta: dict = None) -> str:
     feed_title = (feed_meta or {}).get("title") or f"Feed - #{tag}"
-    feed_link = (feed_meta or {}).get("site_url") or f"https://www.threads.com/search?q={tag}&amp;serp_type=tags"
+    feed_target = (feed_meta or {}).get("target", "")
+    feed_link = (feed_meta or {}).get("site_url") or (feed_target if feed_target.startswith("http") else "") or f"{base_url}/{tag}"
     feed_self = f"{base_url}/{tag}.xml"
     feed_desc = (feed_meta or {}).get("description") or f"Các bài viết mới nhất từ {feed_title}"
     now_rfc822 = format_datetime(datetime.now(timezone.utc))
@@ -40,7 +41,14 @@ def generate_rss_xml(tag: str, posts: list, base_url: str = "https://rss.data1bo
         if gdrive_links or (preview_title and any(ext in preview_title.lower() for ext in ['.epub', '.pdf', '.mobi', '.azw'])):
             prefix = "[Ebook] "
         
-        item_title = f"{prefix}@{username}: {first_line}"
+        if preview_title:
+            item_title = f"{prefix}{preview_title}"
+        elif username and not ("." in username or username.startswith("http")):
+            item_title = f"{prefix}@{username}: {first_line}"
+        else:
+            item_title = f"{prefix}{first_line}"
+
+        creator = username if ("." in username or username.startswith("http")) else f"@{username}"
 
         html_desc_parts = []
         if gdrive_links:
@@ -50,7 +58,7 @@ def generate_rss_xml(tag: str, posts: list, base_url: str = "https://rss.data1bo
                 label = preview_title or "Tải Ebook từ Google Drive"
                 html_desc_parts.append(f'<p style="margin:4px 0;"><a href="{html.escape(glink)}" target="_blank" style="color:#0d6efd; font-weight:bold;">📥 {html.escape(label)}</a></p>')
             html_desc_parts.append('</div>')
-        elif preview_title:
+        elif preview_title and preview_title != first_line:
             html_desc_parts.append('<div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:6px; padding:8px; margin:8px 0;">')
             html_desc_parts.append(f'<strong>🔗 Đính kèm:</strong> {html.escape(preview_title)}')
             html_desc_parts.append('</div>')
@@ -62,14 +70,14 @@ def generate_rss_xml(tag: str, posts: list, base_url: str = "https://rss.data1bo
         for img in images:
             html_desc_parts.append(f'<p><img src="{html.escape(img)}" style="max-width:100%; height:auto;" /></p>')
 
-        html_desc_parts.append(f'<p><a href="{post_url}" target="_blank" style="color:#555;">🔗 Xem bài viết trên Threads</a></p>')
+        html_desc_parts.append(f'<p><a href="{post_url}" target="_blank" style="color:#555;">🔗 Xem bài viết gốc</a></p>')
         item_desc = "".join(html_desc_parts)
 
         xml_lines.append('    <item>')
         xml_lines.append(f'      <title>{html.escape(item_title)}</title>')
         xml_lines.append(f'      <link>{post_url}</link>')
         xml_lines.append(f'      <guid isPermaLink="true">{post_url}</guid>')
-        xml_lines.append(f'      <dc:creator>@{html.escape(username)}</dc:creator>')
+        xml_lines.append(f'      <dc:creator>{html.escape(creator)}</dc:creator>')
         xml_lines.append(f'      <pubDate>{pub_date}</pubDate>')
         xml_lines.append(f'      <description><![CDATA[{item_desc}]]></description>')
         xml_lines.append('    </item>')
