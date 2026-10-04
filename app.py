@@ -776,16 +776,6 @@ async def dashboard(request: Request):
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
         <span>Cào mới tức thì</span>
       </a>
-
-      <div class="nav-section-title" style="margin-top: 14px;">HỆ THỐNG CLARAOS</div>
-      <a href="{CLARAOS_URL}" target="_blank" class="nav-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-        <span>ClaraOS Portal</span>
-      </a>
-      <a href="https://debrid.data1box.win" target="_blank" class="nav-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-        <span>Debrid Manager</span>
-      </a>
     </nav>
 
     <!-- Sidebar Telemetry Badges -->
