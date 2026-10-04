@@ -183,12 +183,14 @@ def format_cookie_headers(cookie_raw: str) -> str:
             pass
     return cookie_raw
 
+from scrapers.cookie_vault import resolve_effective_cookie
+
 def get_feed_posts(slug: str, force_refresh: bool = False) -> list:
     feeds = load_feeds()
     meta = feeds.get(slug, {})
     feed_type = meta.get("type", "threads")
     target = meta.get("target", slug)
-    cookie = meta.get("cookie", "").strip()
+    cookie = resolve_effective_cookie(meta)
 
     if feed_type == "threads":
         return get_threads_feed(target, force_refresh, custom_cookie=cookie)

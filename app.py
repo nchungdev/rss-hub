@@ -14,6 +14,12 @@ from scrapers.feed_manager import (
     sanitize_slug, 
     DATA_DIR
 )
+from scrapers.cookie_vault import (
+    load_vault,
+    save_vault,
+    get_vault_summary,
+    resolve_effective_cookie
+)
 from formatters.rss import generate_rss_xml
 from formatters.json_feed import generate_json_feed
 from formatters.atom import generate_atom_xml
@@ -47,6 +53,49 @@ async def startup_event():
 def health_check():
     return {"status": "ok", "service": "claraos-rss-hub"}
 
+@app.get("/api/cookies")
+def api_get_cookies():
+    return get_vault_summary()
+
+@app.post("/api/cookies")
+async def api_create_or_update_cookie(request: Request):
+    data = await request.json()
+    profile_id = sanitize_slug(data.get("id") or data.get("name", ""))
+    if not profile_id:
+        raise HTTPException(status_code=400, detail="Tên hoặc ID profile cookie không hợp lệ")
+    
+    name = data.get("name", "").strip() or profile_id
+    platform = data.get("platform", "generic").strip()
+    cookie = data.get("cookie", "").strip()
+    description = data.get("description", "").strip()
+
+    vault = load_vault()
+    is_system = vault.get(profile_id, {}).get("is_system", False)
+    vault[profile_id] = {
+        "id": profile_id,
+        "name": name,
+        "platform": platform,
+        "cookie": cookie,
+        "is_system": is_system,
+        "description": description,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    save_vault(vault)
+    return {"status": "ok", "id": profile_id}
+
+@app.delete("/api/cookies/{profile_id}")
+def api_delete_cookie(profile_id: str):
+    vault = load_vault()
+    if profile_id in vault:
+        if vault[profile_id].get("is_system"):
+            vault[profile_id]["cookie"] = ""
+            save_vault(vault)
+            return {"status": "ok", "action": "cleared"}
+        del vault[profile_id]
+        save_vault(vault)
+        return {"status": "ok", "action": "deleted"}
+    raise HTTPException(status_code=404, detail="Không tìm thấy bộ cookie này")
+
 @app.get("/api/feeds")
 def api_get_feeds():
     return load_feeds()
@@ -64,7 +113,29 @@ async def api_create_or_update_feed(request: Request):
     target = data.get("target", "").strip() or slug
     category = data.get("category", "Chung").strip() or "Chung"
     description = data.get("description", "").strip()
+    
+    cookie_mode = data.get("cookie_mode", "default")
+    cookie_profile = data.get("cookie_profile", "").strip()
     cookie = data.get("cookie", "").strip()
+    save_to_vault = bool(data.get("save_to_vault", False))
+    vault_profile_name = data.get("vault_profile_name", "").strip()
+
+    # Save to cookie vault if requested
+    if save_to_vault and cookie and vault_profile_name:
+        vault = load_vault()
+        p_id = sanitize_slug(vault_profile_name) or f"cookie_{int(datetime.now().timestamp())}"
+        vault[p_id] = {
+            "id": p_id,
+            "name": vault_profile_name,
+            "platform": feed_type,
+            "cookie": cookie,
+            "is_system": False,
+            "description": f"Được lưu tự động từ feed [{title}]",
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        save_vault(vault)
+        cookie_mode = "profile"
+        cookie_profile = p_id
 
     feeds = load_feeds()
     feeds[slug] = {
@@ -74,6 +145,8 @@ async def api_create_or_update_feed(request: Request):
         "target": target,
         "category": category,
         "description": description,
+        "cookie_mode": cookie_mode,
+        "cookie_profile": cookie_profile,
         "cookie": cookie,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
@@ -90,7 +163,6 @@ def api_delete_feed(slug: str):
     if clean_slug in feeds:
         del feeds[clean_slug]
         save_feeds(feeds)
-        # Delete cache if present
         cache_file = os.path.join(DATA_DIR, f"history_{clean_slug}.json")
         if os.path.exists(cache_file):
             try:
@@ -127,7 +199,20 @@ async def dashboard(request: Request):
         if feed_type == "rsshub": type_badge = "RSSHUB"
         elif feed_type == "custom_rss": type_badge = "EXTERNAL RSS"
 
-        cookie_badge = '<span class="badge" style="padding: 2px 6px; font-size: 0.65rem; background: rgba(16, 185, 129, 0.12); color: #34d399; border-color: rgba(16, 185, 129, 0.3);" title="Đã nạp Cookie xác thực"><span class="dot" style="background:#10b981; box-shadow:0 0 6px #10b981;"></span> Login Cookie</span>' if meta.get("cookie") else ""
+        # Cookie Mode Badge
+        cookie_mode = meta.get("cookie_mode", "default")
+        cookie_profile = meta.get("cookie_profile", "")
+        cookie_val = meta.get("cookie", "")
+        
+        cookie_badge = ""
+        if cookie_mode == "default" and feed_type == "threads":
+            cookie_badge = '<span class="badge cyan" style="padding: 2px 7px; font-size: 0.65rem;" title="Đang dùng Cookie Threads mặc định của hệ thống"><span class="dot" style="background:#0ea5e9;"></span> Threads Shared Cookie</span>'
+        elif cookie_mode == "profile":
+            cookie_badge = f'<span class="badge green" style="padding: 2px 7px; font-size: 0.65rem;" title="Dùng bộ Cookie [{cookie_profile}]"><span class="dot" style="background:#10b981;"></span> Vault: {cookie_profile}</span>'
+        elif cookie_mode == "custom" and cookie_val:
+            cookie_badge = '<span class="badge" style="padding: 2px 7px; font-size: 0.65rem; background:rgba(245, 158, 11, 0.12); color:#fbbf24; border-color:rgba(245, 158, 11, 0.3);" title="Đang dùng Cookie riêng của kênh"><span class="dot" style="background:#f59e0b;"></span> Custom Cookie</span>'
+        elif cookie_mode == "none":
+            cookie_badge = '<span class="badge" style="padding: 2px 7px; font-size: 0.65rem; opacity:0.65;" title="Chế độ Guest / Không dùng cookie">Guest</span>'
 
         # Recent items preview
         preview_items_html = ""
@@ -161,7 +246,7 @@ async def dashboard(request: Request):
                         </svg>
                     </div>
                     <div>
-                        <div style="display: flex; align-items: center; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                             <span style="font-size: 0.68rem; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.05em;">{cat}</span>
                             <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.06); color: var(--text-dim); border: 1px solid var(--card-border);">{type_badge}</span>
                             {cookie_badge}
@@ -714,7 +799,7 @@ async def dashboard(request: Request):
       background: #0f172a;
       border: 1px solid var(--card-border);
       border-radius: 20px;
-      width: min(580px, 100%);
+      width: min(600px, 100%);
       max-height: 90vh;
       overflow-y: auto;
       padding: 26px;
@@ -952,6 +1037,10 @@ async def dashboard(request: Request):
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         <span>Thêm kênh mới</span>
       </button>
+      <button class="nav-item" onclick="openCookieVaultModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-1.5 1.5L14 9l-1.5-1.5L11 9l-1.5-1.5L8 9l-1.5-1.5-4 4a5 5 0 0 0 7 7l4-4 1.5 1.5L16 15l1.5-1.5L19 15l1.5-1.5 2-2"/></svg>
+        <span>Kho Cookie Vault</span>
+      </button>
       <button class="nav-item" onclick="refreshAllFeeds()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
         <span>Cào mới tất cả</span>
@@ -980,13 +1069,17 @@ async def dashboard(request: Request):
       </div>
 
       <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
+        <button class="btn" onclick="openCookieVaultModal()" title="Quản lý Kho Cookie tái sử dụng">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px; height:15px;"><path d="M21 2l-2 2m-1.5 1.5L14 9l-1.5-1.5L11 9l-1.5-1.5L8 9l-1.5-1.5-4 4a5 5 0 0 0 7 7l4-4 1.5 1.5L16 15l1.5-1.5L19 15l1.5-1.5 2-2"/></svg>
+          <span>Kho Cookie</span>
+        </button>
         <button class="btn primary" onclick="openModal('modalAdd')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           <span>Thêm kênh Feed</span>
         </button>
         <button id="btnRefreshTop" class="btn" onclick="refreshAllFeeds()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span>Làm mới tất cả</span>
+          <span>Làm mới</span>
         </button>
       </div>
     </header>
@@ -1059,21 +1152,6 @@ async def dashboard(request: Request):
       <!-- Task / Feeds List -->
       <div id="viewFeeds" class="task-list">
         {feed_cards if feed_cards else '<div style="text-align:center; padding:40px; color:var(--text-dim);">Chưa có kênh feed nào. Bấm "+ Thêm kênh Feed" để bắt đầu!</div>'}
-      </div>
-
-      <!-- Quick Ecosystem Guide Box -->
-      <div style="margin-top: 24px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; padding: 20px; backdrop-filter: blur(12px);">
-        <div style="display: flex; align-items: flex-start; gap: 14px;">
-          <div style="width: 40px; height: 40px; border-radius: 10px; background: rgba(14, 165, 233, 0.15); border: 1px solid rgba(14, 165, 233, 0.3); display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: #38bdf8;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-          </div>
-          <div style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.6;">
-            <div style="font-size: 0.92rem; font-weight: 700; color: #fff; margin-bottom: 4px;">Khả năng cấu hình &amp; Kết nối đa nguồn của ClaraOS RSS Hub</div>
-            <div>&bull; <strong>Threads Social Scraper:</strong> Nhập bất kỳ thẻ hashtag hoặc từ khóa (ví dụ: <code style="font-family:var(--mono); color:#38bdf8;">congnghe</code>, <code style="font-family:var(--mono); color:#38bdf8;">reviewphim</code>, <code style="font-family:var(--mono); color:#38bdf8;">sachhay</code>) để tự động cào bài viết qua FlareSolverr.</div>
-            <div>&bull; <strong>RSSHub Engine (Hàng ngàn nguồn có sẵn):</strong> Hỗ trợ trực tiếp các route RSSHub (ví dụ: <code style="font-family:var(--mono); color:#c084fc;">telegram/channel/duongdancity</code>, <code style="font-family:var(--mono); color:#c084fc;">bilibili/ranking/0/3</code>, <code style="font-family:var(--mono); color:#c084fc;">youtube/user/...</code>).</div>
-            <div>&bull; <strong>URL RSS Ngoài:</strong> Nhập URL RSS của bất kỳ báo chí/blog nào (ví dụ: <code style="font-family:var(--mono); color:#fbbf24;">https://vnexpress.net/rss/tin-moi-nhat.rss</code>) để đồng bộ và chuyển đổi sang JSON Feed v1.1 &amp; Atom 1.0.</div>
-          </div>
-        </div>
       </div>
     </main>
 
@@ -1149,13 +1227,44 @@ async def dashboard(request: Request):
           <textarea id="feedDesc" class="form-textarea" rows="2" placeholder="Mô tả nội dung kênh feed này..."></textarea>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Cookie / Phiên đăng nhập (Tùy chọn cho trang yêu cầu Login)</label>
-          <textarea id="feedCookie" class="form-textarea" rows="2" placeholder="vd: sessionid=xyz...; token=abc...; hoặc chuỗi JSON từ Cookie-Editor" style="font-family: var(--mono); font-size: 0.76rem;"></textarea>
-          <div class="form-hint">Dán chuỗi Cookie từ trình duyệt để cào các trang yêu cầu đăng nhập, bài viết riêng tư hoặc diễn đàn thành viên.</div>
+        <!-- Cookie Configuration Section -->
+        <div style="background: rgba(7, 12, 24, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; margin-bottom: 16px;">
+          <div class="form-group" style="margin-bottom: 10px;">
+            <label class="form-label" style="display:flex; align-items:center; justify-content:space-between;">
+              <span>Xác thực Cookie / Phiên đăng nhập</span>
+              <a href="javascript:void(0)" onclick="openCookieVaultModal()" style="color:#38bdf8; font-size:0.72rem; text-decoration:none;">Quản lý Kho Cookie &rarr;</a>
+            </label>
+            <select id="feedCookieMode" class="form-select" onchange="handleCookieModeChange(this.value)">
+              <option value="default" id="optCookieDefault">🔹 Dùng Cookie Threads mặc định (Hệ thống)</option>
+              <option value="profile">📂 Chọn từ Kho Cookie đã lưu (Cookie Vault)...</option>
+              <option value="custom">✏️ Nhập Cookie riêng biệt cho kênh này</option>
+              <option value="none">🌐 Không dùng Cookie (Chế độ công khai / Guest)</option>
+            </select>
+            <div class="form-hint" id="hintCookieMode">Tự động sử dụng cookie Threads đã cấu hình sẵn của hệ thống.</div>
+          </div>
+
+          <div id="groupCookieProfile" class="form-group" style="display: none; margin-bottom: 10px;">
+            <label class="form-label">Chọn Bộ Cookie đã lưu *</label>
+            <select id="feedCookieProfile" class="form-select"></select>
+          </div>
+
+          <div id="groupCookieCustom" class="form-group" style="display: none; margin-bottom: 0;">
+            <label class="form-label">Dán Cookie riêng *</label>
+            <textarea id="feedCookieCustom" class="form-textarea" rows="2" placeholder="vd: sessionid=xyz...; token=abc...; hoặc dán JSON từ Cookie-Editor" style="font-family: var(--mono); font-size: 0.76rem;"></textarea>
+            
+            <div style="margin-top: 8px;">
+              <label style="display: flex; align-items: center; gap: 8px; font-size: 0.78rem; color: var(--text-dim); cursor: pointer;">
+                <input type="checkbox" id="chkSaveToVault" onchange="document.getElementById('wrapProfileName').style.display = this.checked ? 'block' : 'none';">
+                <span style="color: var(--text-muted); font-weight: 500;">Lưu bộ cookie này vào Kho Cookie để tái sử dụng cho các kênh khác</span>
+              </label>
+              <div id="wrapProfileName" style="display: none; margin-top: 6px;">
+                <input type="text" id="vaultProfileName" class="form-input" placeholder="Đặt tên bộ cookie (vd: Threads Acc Phụ, Voz VIP, Báo Trả Phí)">
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div style="display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:24px; padding-top:16px; border-top:1px solid var(--card-border);">
+        <div style="display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:20px; padding-top:16px; border-top:1px solid var(--card-border);">
           <button type="button" class="btn" onclick="closeModal('modalAdd')">Hủy bỏ</button>
           <button type="submit" id="btnSubmitFeed" class="btn primary">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px; height:15px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
@@ -1163,6 +1272,59 @@ async def dashboard(request: Request):
           </button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- MODAL: COOKIE VAULT MANAGEMENT -->
+  <div id="modalCookieVault" class="modal-overlay" onclick="handleModalClick(event, 'modalCookieVault')">
+    <div class="modal-card" style="width: min(650px, 100%);">
+      <div class="modal-head">
+        <div>
+          <h2 class="modal-title">Kho Cookie Xác Thực (Cookie Vault)</h2>
+          <div style="font-size:0.75rem; color:var(--text-dim); margin-top:2px;">Quản lý các bộ Cookie tái sử dụng cho từng nền tảng hoặc tài khoản riêng biệt.</div>
+        </div>
+        <button class="modal-close" onclick="closeModal('modalCookieVault')">✕</button>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <span style="font-size:0.75rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;">Danh sách bộ Cookie</span>
+        <button class="btn primary" onclick="showAddCookieForm(true)" style="height:30px; font-size:0.74rem;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px; height:13px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span>Thêm bộ Cookie mới</span>
+        </button>
+      </div>
+
+      <!-- Add Cookie Form (collapsible) -->
+      <div id="boxAddCookie" style="display:none; background:rgba(7, 12, 24, 0.85); border:1px solid var(--primary-glow); border-radius:14px; padding:14px; margin-bottom:16px;">
+        <div style="font-size:0.85rem; font-weight:700; color:#fff; margin-bottom:10px;">Thêm bộ Cookie vào Kho lưu trữ</div>
+        <form onsubmit="handleSaveVaultCookie(event)">
+          <div class="form-group" style="margin-bottom:10px;">
+            <label class="form-label">Tên định danh *</label>
+            <input type="text" id="newVaultName" class="form-input" required placeholder="vd: Threads Acc 2, Diễn đàn Voz, Facebook Group">
+          </div>
+          <div class="form-group" style="margin-bottom:10px;">
+            <label class="form-label">Nền tảng / Domain *</label>
+            <input type="text" id="newVaultPlatform" class="form-input" required placeholder="vd: threads, voz.vn, tuoitre.vn">
+          </div>
+          <div class="form-group" style="margin-bottom:10px;">
+            <label class="form-label">Chuỗi Cookie *</label>
+            <textarea id="newVaultCookie" class="form-textarea" required rows="2" placeholder="sessionid=...; token=...; hoặc dán JSON từ Cookie-Editor" style="font-family:var(--mono); font-size:0.75rem;"></textarea>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:8px;">
+            <button type="button" class="btn" onclick="showAddCookieForm(false)" style="height:30px; font-size:0.74rem;">Đóng</button>
+            <button type="submit" class="btn primary" style="height:30px; font-size:0.74rem;">Lưu vào Kho</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Cookie Vault List -->
+      <div id="vaultList" style="display:flex; flex-direction:column; gap:10px;">
+        <div style="text-align:center; padding:20px; color:var(--text-dim); font-size:0.8rem;">Đang tải danh sách Cookie...</div>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; margin-top:20px; padding-top:14px; border-top:1px solid var(--card-border);">
+        <button class="btn" onclick="closeModal('modalCookieVault')">Đóng</button>
+      </div>
     </div>
   </div>
 
@@ -1249,7 +1411,10 @@ async def dashboard(request: Request):
 
     function openModal(id) {{
       const m = document.getElementById(id);
-      if (m) m.classList.add('open');
+      if (m) {{
+        m.classList.add('open');
+        if (id === 'modalAdd') populateProfileDropdown();
+      }}
     }}
 
     function closeModal(id) {{
@@ -1281,19 +1446,152 @@ async def dashboard(request: Request):
       const lbl = document.getElementById('lblTarget');
       const hint = document.getElementById('hintTarget');
       const inp = document.getElementById('feedTarget');
+      const optDefault = document.getElementById('optCookieDefault');
+      const modeSelect = document.getElementById('feedCookieMode');
+      const hintCookie = document.getElementById('hintCookieMode');
+
       if (val === 'threads') {{
         lbl.innerText = 'Từ khóa / Hashtag Threads *';
         inp.placeholder = 'vd: congnghe, reviewphim, kinhte, manga';
         hint.innerText = 'Nhập hashtag hoặc từ khóa cần cào và lọc link Ebook trên Threads.';
+        optDefault.innerText = '🔹 Dùng Cookie Threads mặc định (Hệ thống có sẵn)';
+        modeSelect.value = 'default';
+        hintCookie.innerText = 'Tự động sử dụng cookie Threads đã cấu hình sẵn của hệ thống.';
       }} else if (val === 'rsshub') {{
         lbl.innerText = 'Route RSSHub Upstream *';
         inp.placeholder = 'vd: telegram/channel/duongdancity, bilibili/ranking/0/3';
         hint.innerText = 'Nhập đường dẫn route được hỗ trợ bởi hệ thống RSSHub.';
+        optDefault.innerText = '🌐 Mặc định theo nguồn (Public / Không cookie)';
+        modeSelect.value = 'default';
+        hintCookie.innerText = 'Truy vấn trực tiếp qua RSSHub Core mà không gửi thêm cookie.';
       }} else if (val === 'custom_rss') {{
         lbl.innerText = 'Đường dẫn URL RSS / Atom ngoài *';
         inp.placeholder = 'vd: https://vnexpress.net/rss/tin-moi-nhat.rss';
         hint.innerText = 'Nhập địa chỉ URL RSS/Atom của bất kỳ website hoặc báo chí nào.';
+        optDefault.innerText = '🌐 Mặc định theo nguồn (Public / Không cookie)';
+        modeSelect.value = 'default';
+        hintCookie.innerText = 'Tải trực tiếp URL công khai.';
       }}
+      handleCookieModeChange(modeSelect.value);
+    }}
+
+    function handleCookieModeChange(val) {{
+      const grpProfile = document.getElementById('groupCookieProfile');
+      const grpCustom = document.getElementById('groupCookieCustom');
+      const hintCookie = document.getElementById('hintCookieMode');
+
+      grpProfile.style.display = (val === 'profile') ? 'block' : 'none';
+      grpCustom.style.display = (val === 'custom') ? 'block' : 'none';
+
+      if (val === 'profile') {{
+        hintCookie.innerText = 'Kế thừa bộ cookie đã lưu từ Kho Cookie Vault.';
+      }} else if (val === 'custom') {{
+        hintCookie.innerText = 'Dán chuỗi cookie riêng chỉ áp dụng cho riêng kênh feed này.';
+      }} else if (val === 'none') {{
+        hintCookie.innerText = 'Bỏ qua toàn bộ xác thực cookie (truy cập dạng khách).';
+      }}
+    }}
+
+    function populateProfileDropdown() {{
+      fetch('/api/cookies')
+        .then(r => r.json())
+        .then(profiles => {{
+          const sel = document.getElementById('feedCookieProfile');
+          sel.innerHTML = '';
+          if (!profiles || profiles.length === 0) {{
+            sel.innerHTML = '<option value="">(Chưa có bộ cookie nào trong kho)</option>';
+            return;
+          }}
+          profiles.forEach(p => {{
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.innerText = p.name + ' [' + p.platform + '] (' + p.masked + ')';
+            sel.appendChild(opt);
+          }});
+        }});
+    }}
+
+    function openCookieVaultModal() {{
+      openModal('modalCookieVault');
+      renderCookieVault();
+    }}
+
+    function showAddCookieForm(show) {{
+      document.getElementById('boxAddCookie').style.display = show ? 'block' : 'none';
+    }}
+
+    function renderCookieVault() {{
+      const box = document.getElementById('vaultList');
+      box.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-dim); font-size:0.8rem;">Đang nạp Kho Cookie...</div>';
+
+      fetch('/api/cookies')
+        .then(r => r.json())
+        .then(profiles => {{
+          if (!profiles || profiles.length === 0) {{
+            box.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-dim); font-size:0.8rem;">Kho cookie hiện đang trống.</div>';
+            return;
+          }}
+          let html = '';
+          profiles.forEach(p => {{
+            const sysBadge = p.is_system ? '<span class="badge cyan" style="padding:1px 6px; font-size:0.65rem;">System</span>' : '';
+            html += `
+            <div style="background:rgba(15, 23, 42, 0.7); border:1px solid var(--card-border); border-radius:12px; padding:12px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+              <div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span style="font-weight:700; font-size:0.85rem; color:#fff;">${{p.name}}</span>
+                  <span style="font-size:0.68rem; font-weight:600; padding:2px 6px; border-radius:4px; background:rgba(255,255,255,0.06); color:var(--text-muted); text-transform:uppercase;">${{p.platform}}</span>
+                  ${{sysBadge}}
+                </div>
+                <div style="font-family:var(--mono); font-size:0.75rem; color:#38bdf8; margin-top:3px;">
+                  Cookie: ${{p.masked}}
+                </div>
+                <div style="font-size:0.7rem; color:var(--text-dim); margin-top:2px;">
+                  ${{p.description || 'Không có mô tả'}}
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:6px;">
+                ${{!p.is_system ? `<button class="btn danger" onclick="deleteVaultCookie('${{p.id}}')" style="height:28px; padding:0 8px; font-size:0.72rem;">Xóa</button>` : `<span style="font-size:0.7rem; color:var(--text-dim);">Mặc định</span>`}}
+              </div>
+            </div>
+            `;
+          }});
+          box.innerHTML = html;
+        }})
+        .catch(e => {{
+          box.innerHTML = '<div style="color:#fb7185; padding:10px; font-size:0.8rem;">Lỗi tải kho cookie: ' + e + '</div>';
+        }});
+    }}
+
+    function handleSaveVaultCookie(e) {{
+      e.preventDefault();
+      const payload = {{
+        name: document.getElementById('newVaultName').value.trim(),
+        platform: document.getElementById('newVaultPlatform').value.trim().toLowerCase(),
+        cookie: document.getElementById('newVaultCookie').value.trim()
+      }};
+      fetch('/api/cookies', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify(payload)
+      }})
+      .then(r => r.json())
+      .then(d => {{
+        showToast('Đã lưu thành công bộ cookie vào Kho!');
+        showAddCookieForm(false);
+        renderCookieVault();
+      }})
+      .catch(err => showToast('Lỗi: ' + err, true));
+    }}
+
+    function deleteVaultCookie(id) {{
+      if (!confirm('Xóa bộ cookie [' + id + '] khỏi Kho?')) return;
+      fetch('/api/cookies/' + id, {{ method: 'DELETE' }})
+        .then(r => r.json())
+        .then(d => {{
+          showToast('Đã xóa bộ cookie');
+          renderCookieVault();
+        }})
+        .catch(err => showToast('Lỗi khi xóa: ' + err, true));
     }}
 
     function handleSaveFeed(e) {{
@@ -1309,7 +1607,11 @@ async def dashboard(request: Request):
         target: document.getElementById('feedTarget').value.trim(),
         category: document.getElementById('feedCategory').value.trim() || 'Chung',
         description: document.getElementById('feedDesc').value.trim(),
-        cookie: document.getElementById('feedCookie').value.trim()
+        cookie_mode: document.getElementById('feedCookieMode').value,
+        cookie_profile: document.getElementById('feedCookieProfile').value,
+        cookie: document.getElementById('feedCookieCustom').value.trim(),
+        save_to_vault: document.getElementById('chkSaveToVault').checked,
+        vault_profile_name: document.getElementById('vaultProfileName').value.trim()
       }};
 
       fetch('/api/feeds', {{
@@ -1383,6 +1685,9 @@ async def handle_feed_or_proxy(path: str, request: Request):
     if clean_path in feeds or clean_path == "bookthreads":
         meta = feeds.get(clean_path, {})
         posts = await asyncio.to_thread(get_feed_posts, clean_path, False)
+        if not isinstance(posts, list):
+            posts = list(posts.values()) if isinstance(posts, dict) else []
+
         if ext in ("xml", "rss"):
             content = generate_rss_xml(clean_path, posts, BASE_URL, meta)
             return Response(content=content, media_type="application/rss+xml; charset=utf-8")
