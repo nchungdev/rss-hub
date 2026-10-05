@@ -150,6 +150,16 @@ def fetch_threads_posts(tag: str = "bookthreads", max_timeout: int = 60000, cust
                 if c_cands:
                     images.append(c_cands[0].get("url"))
 
+        videos = []
+        if "video_versions" in p and p["video_versions"]:
+            v_url = p["video_versions"][0].get("url")
+            if v_url: videos.append(v_url)
+        elif "carousel_media" in p:
+            for cm in p.get("carousel_media", []):
+                if "video_versions" in cm and cm["video_versions"]:
+                    v_url = cm["video_versions"][0].get("url")
+                    if v_url: videos.append(v_url)
+
         post_url = f"https://www.threads.com/t/{code}"
 
         parsed_posts.append({
@@ -160,6 +170,7 @@ def fetch_threads_posts(tag: str = "bookthreads", max_timeout: int = 60000, cust
             "taken_at": taken_at,
             "url": post_url,
             "images": images,
+            "videos": videos,
             "gdrive_links": gdrive_links,
             "preview_title": preview_title,
             "preview_url": preview_url

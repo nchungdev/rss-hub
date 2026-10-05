@@ -2756,7 +2756,7 @@ async def dashboard(request: Request):
           </div>
           <div class="form-group" style="margin-bottom: 10px;">
             <label class="form-label required">Chuỗi hoặc Mẫu tìm kiếm (Pattern)</label>
-            <input type="text" id="ruleReplacePattern" class="form-input" placeholder="vd: https?://t\.me/\S+|\[Quảng cáo\]" style="font-family: var(--mono); font-size: 0.8rem;">
+            <input type="text" id="ruleReplacePattern" class="form-input" placeholder="vd: https?://t\\.me/\\S+|\\[Quảng cáo\\]" style="font-family: var(--mono); font-size: 0.8rem;">
             <div class="form-hint">Nhập từ khóa đơn giản hoặc biểu thức Regex muốn tìm và thay thế.</div>
           </div>
           <div class="form-group" style="margin-bottom: 0;">
@@ -2793,7 +2793,7 @@ async def dashboard(request: Request):
                 <span>Sử dụng Regex</span>
               </label>
             </div>
-            <input type="text" id="ruleFilterPattern" class="form-input" placeholder="vd: giveaway|tuyển dụng|khuyến mãi|shopee\.vn" style="font-family: var(--mono); font-size: 0.8rem;">
+            <input type="text" id="ruleFilterPattern" class="form-input" placeholder="vd: giveaway|tuyển dụng|khuyến mãi|shopee\\.vn" style="font-family: var(--mono); font-size: 0.8rem;">
             <div class="form-hint">Nếu chọn Exclude, bài viết chứa từ khóa này sẽ bị lọc bỏ khỏi luồng RSS.</div>
           </div>
         </div>
@@ -2850,7 +2850,7 @@ async def dashboard(request: Request):
           </div>
           <div class="form-group" style="margin-bottom: 10px;">
             <label class="form-label">Regex quét link tùy biến (Custom Regex)</label>
-            <input type="text" id="ruleExtractCustomRegex" class="form-input" placeholder="Để trống hoặc vd: https?://(?:www\.)?example\.com/download/\w+" style="font-family: var(--mono); font-size: 0.8rem;">
+            <input type="text" id="ruleExtractCustomRegex" class="form-input" placeholder="Để trống hoặc vd: https?://(?:www\\.)?example\\.com/download/\\w+" style="font-family: var(--mono); font-size: 0.8rem;">
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <div>
@@ -3555,6 +3555,24 @@ async def dashboard(request: Request):
       }}
     }}
 
+    function toggleFullContent(id, btn) {{
+      const el = document.getElementById(id);
+      if (!el) return;
+      const isHidden = el.style.display === 'none' || el.style.display === '';
+      el.style.display = isHidden ? 'block' : 'none';
+      if (btn) btn.innerText = isHidden ? 'Thu gọn ▴' : 'Toàn văn ▾';
+    }}
+
+    function copyAttachmentLink(url, btn) {{
+      navigator.clipboard.writeText(url).then(() => {{
+        if (btn) {{
+          const orig = btn.innerText;
+          btn.innerText = '✓ Đã chép';
+          setTimeout(() => {{ btn.innerText = orig; }}, 2000);
+        }}
+      }});
+    }}
+
     function renderPostCard(item, idx, type) {{
       const isOut = type === 'output';
       const feedSlug = item._feed_slug || '';
@@ -3567,74 +3585,214 @@ async def dashboard(request: Request):
 
       const link = item.url || item.link || '#';
       const dateStr = item._formatted_date || item.pubDate || item.published || (item.taken_at ? new Date(item.taken_at * 1000).toLocaleString() : '') || item.created_at || '';
-      const content = isOut
-        ? (item._formatted_html || item.content || item.description || item.text || item.summary || '')
-        : (item.text || item.description || item.content || item.summary || item._formatted_html || '');
+      
+      const fullText = (item._formatted_html || item.content || item.text || item.description || item.summary || '').trim();
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = fullText;
+      const cleanFullText = tempDiv.textContent || tempDiv.innerText || '';
 
-      const jsonId = 'post_' + type + '_' + idx;
-      const jsonStr = encodeURIComponent(JSON.stringify(item, null, 2));
+      // 1. SMART SUMMARY
+      let summaryText = (item._summary || item.summary || '').trim();
+      if (!summaryText) {{
+        summaryText = cleanFullText.length > 220 ? cleanFullText.slice(0, 220) + '...' : cleanFullText;
+      }}
+      const hasFullContentToExpand = cleanFullText.length > summaryText.length + 30;
+      const fullTextId = 'full_text_' + type + '_' + idx;
 
-      let ebookBox = '';
-      const driveList = item.gdrive_links || item._extracted_links || [];
-      if (isOut) {{
-        if (item.enclosure && item.enclosure.url) {{
-          ebookBox = `
-            <div style="margin-top: 8px; padding: 6px 10px; background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap;">
-              <div style="display: flex; align-items: center; gap: 4px; font-size: 0.72rem; color: #10b981; font-weight: 500;">
-                <span>📥 Enclosure:</span>
-                <a href="${{item.enclosure.url}}" target="_blank" rel="noopener" style="color: #34d399; text-decoration: underline; word-break: break-all;">${{item.enclosure.url}}</a>
-              </div>
-              <a href="${{item.enclosure.url}}" target="_blank" class="btn" style="height: 22px; padding: 0 6px; font-size: 0.65rem; background: rgba(16,185,129,0.18); color: #34d399; border-color: rgba(16,185,129,0.4);">Mở Link</a>
-            </div>
-          `;
-        }} else if (driveList.length > 0) {{
-          const linksHtml = driveList.map(l => `<a href="${{l}}" target="_blank" rel="noopener" style="color: #10b981; text-decoration: underline; margin-right: 6px; font-size: 0.7rem; word-break: break-all;">📚 ${{l}}</a>`).join('');
-          ebookBox = `
-            <div style="margin-top: 8px; padding: 6px 10px; background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: 6px; font-size: 0.72rem;">
-              <div style="font-weight: 600; color: #10b981; margin-bottom: 3px;">📥 Kho Ebook / Tài liệu:</div>
-              <div>${{linksHtml}}</div>
-            </div>
-          `;
+      // 2. IMAGES & VIDEOS
+      const rawImages = item._formatted_images || item.images || [];
+      const images = Array.isArray(rawImages) ? rawImages.filter(u => typeof u === 'string' && u.startsWith('http')) : [];
+      
+      const rawVideos = item._formatted_videos || item.videos || (item.video_url ? [item.video_url] : []);
+      const videos = Array.isArray(rawVideos) ? rawVideos.filter(u => typeof u === 'string' && u.startsWith('http')) : [];
+
+      // 3. ATTACHMENTS (EBOOKS, DRIVE, DIRECT FILES, ENCLOSURES)
+      let attachments = item._attachments || [];
+      if (!attachments || attachments.length === 0) {{
+        attachments = [];
+        const seenUrls = new Set();
+        const gLinks = item.gdrive_links || [];
+        gLinks.forEach(gl => {{
+          if (!seenUrls.has(gl)) {{
+            seenUrls.add(gl);
+            attachments.push({{ type: 'gdrive', title: item.preview_title || 'Google Drive Ebook / Tài liệu', url: gl, ext: 'gdrive' }});
+          }}
+        }});
+        const extLinks = item._extracted_links || [];
+        extLinks.forEach(el => {{
+          if (!seenUrls.has(el)) {{
+            seenUrls.add(el);
+            const ext = el.includes('.') ? el.split('.').pop().split('?')[0].toLowerCase() : 'link';
+            attachments.push({{ type: 'file', title: el.split('/').pop().split('?')[0] || 'Tệp đính kèm', url: el, ext: ext }});
+          }}
+        }});
+        if (item.enclosure && item.enclosure.url && !seenUrls.has(item.enclosure.url)) {{
+          seenUrls.add(item.enclosure.url);
+          const encType = item.enclosure.type || '';
+          attachments.push({{ type: 'enclosure', title: item.enclosure.title || 'Tệp đính kèm RSS', url: item.enclosure.url, ext: encType }});
         }}
       }}
 
-      const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = content;
-      const cleanSnippet = tempDiv.textContent || tempDiv.innerText || '';
-      const truncatedSnippet = cleanSnippet.length > 200 ? cleanSnippet.slice(0, 200) + '...' : cleanSnippet;
+      // RENDER MEDIA SECTION (IMAGES / VIDEOS)
+      let mediaHtml = '';
+      if (videos.length > 0) {{
+        const vUrl = videos[0];
+        const isDirectVideo = vUrl.endsWith('.mp4') || vUrl.endsWith('.webm') || vUrl.includes('video');
+        mediaHtml += `
+          <div style="margin-bottom: 12px; background: rgba(56, 189, 248, 0.05); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px; padding: 10px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
+              <span style="font-size: 0.72rem; font-weight: 600; color: #38bdf8; display: inline-flex; align-items: center; gap: 4px;">
+                🎬 Video (${{videos.length}})
+              </span>
+              <a href="${{vUrl}}" target="_blank" rel="noopener" class="btn" style="height: 22px; padding: 0 8px; font-size: 0.65rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border-color: rgba(56, 189, 248, 0.35);">
+                ▶ Mở Video
+              </a>
+            </div>
+            ${{isDirectVideo ? `
+              <video controls playsinline preload="metadata" style="width: 100%; max-height: 200px; border-radius: 6px; background: #000; display: block;">
+                <source src="${{vUrl}}">
+              </video>
+            ` : ''}}
+          </div>
+        `;
+      }}
 
+      if (images.length === 1) {{
+        mediaHtml += `
+          <div style="margin-bottom: 12px; border-radius: 8px; overflow: hidden; max-height: 220px; background: #000; border: 1px solid var(--card-border);">
+            <a href="${{images[0]}}" target="_blank" rel="noopener" title="Bấm để xem ảnh gốc">
+              <img src="${{images[0]}}" alt="Media" loading="lazy" style="width: 100%; height: auto; max-height: 220px; object-fit: cover; display: block;">
+            </a>
+          </div>
+        `;
+      }} else if (images.length > 1) {{
+        mediaHtml += `
+          <div style="margin-bottom: 12px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+              <span style="font-size: 0.7rem; color: var(--text-dim); display: inline-flex; align-items: center; gap: 4px;">
+                🖼️ Hình ảnh (${{images.length}} ảnh)
+              </span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 6px;">
+              ${{images.slice(0, 4).map(u => `
+                <a href="${{u}}" target="_blank" rel="noopener" style="border-radius: 6px; overflow: hidden; height: 75px; background: #000; display: block; border: 1px solid var(--card-border);" title="Xem ảnh">
+                  <img src="${{u}}" alt="Thumb" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;">
+                </a>
+              `).join('')}}
+            </div>
+          </div>
+        `;
+      }}
+
+      // RENDER ATTACHMENTS SECTION
+      let attachHtml = '';
+      if (attachments.length > 0) {{
+        const attachItems = attachments.map(att => {{
+          let icon = '📎';
+          let extUpper = (att.ext || '').toUpperCase();
+          if (att.ext === 'gdrive' || (att.url && att.url.includes('drive.google.com'))) {{
+            icon = '☁️';
+            extUpper = 'GDRIVE';
+          }} else if (['EPUB', 'MOBI', 'AZW', 'AZW3'].includes(extUpper)) {{
+            icon = '📚';
+          }} else if (extUpper === 'PDF') {{
+            icon = '📕';
+          }} else if (['ZIP', 'RAR', '7Z', 'TAR', 'GZ'].includes(extUpper)) {{
+            icon = '💾';
+          }} else if (['MP3', 'AUDIO', 'WAV', 'M4A'].includes(extUpper)) {{
+            icon = '🎵';
+          }} else if (['MP4', 'VIDEO', 'MKV', 'WEBM'].includes(extUpper)) {{
+            icon = '🎬';
+          }}
+
+          return `
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; font-size: 0.72rem;">
+              <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
+                <span>${{icon}}</span>
+                <span class="badge gray" style="font-size: 0.6rem; padding: 1px 4px;">${{extUpper || 'FILE'}}</span>
+                <a href="${{att.url}}" target="_blank" rel="noopener" style="color: #38bdf8; text-decoration: underline; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${{att.url}}">
+                  ${{att.title || att.url}}
+                </a>
+              </div>
+              <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                <button type="button" class="btn" onclick="copyAttachmentLink('${{att.url}}', this)" style="height: 22px; padding: 0 6px; font-size: 0.65rem;" title="Chép URL">
+                  Chép
+                </button>
+                <a href="${{att.url}}" target="_blank" rel="noopener" class="btn primary" style="height: 22px; padding: 0 7px; font-size: 0.65rem;" title="Mở link hoặc tải về">
+                  Mở ↗
+                </a>
+              </div>
+            </div>
+          `;
+        }}).join('');
+
+        attachHtml = `
+          <div style="margin-top: 12px; padding: 10px; background: rgba(16,185,129,0.06); border: 1px solid rgba(16,185,129,0.22); border-radius: 8px;">
+            <div style="font-size: 0.74rem; font-weight: 700; color: #10b981; margin-bottom: 6px; display: flex; align-items: center; gap: 5px;">
+              <span>📎 File &amp; Link đính kèm (${{attachments.length}}):</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              ${{attachItems}}
+            </div>
+          </div>
+        `;
+      }}
+
+      const jsonId = 'post_' + type + '_' + idx;
+      const jsonStr = encodeURIComponent(JSON.stringify(item, null, 2));
       const clickFilterFn = isOut ? `onOutputFeedFilterChange('${{feedSlug}}')` : `onRawFeedFilterChange('${{feedSlug}}')`;
+      const accentColor = isOut ? '#10b981' : '#38bdf8';
 
       return `
-        <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; justify-content: space-between; transition: all 0.15s ease;">
+        <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; transition: all 0.15s ease; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
           <div>
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;">
+            <!-- Top Badges & JSON trigger -->
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
               <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                <span class="badge gray" style="font-size: 0.65rem; cursor: pointer;" onclick="${{clickFilterFn}}" title="Lọc theo kênh này">${{feedTitle}}</span>
-                <span class="badge blue" style="font-size: 0.62rem;">${{feedCat}}</span>
-                ${{isOut && item._applied_rules && item._applied_rules.length ? '<span style="font-size:0.65rem; color:#a855f7;">⚡ ' + item._applied_rules.join(', ') + '</span>' : ''}}
-                ${{!isOut ? '<span class="badge" style="font-size:0.62rem; background:rgba(56,189,248,0.12); color:#38bdf8;">RAW</span>' : ''}}
+                <span class="badge gray" style="font-size: 0.68rem; cursor: pointer; font-weight: 600;" onclick="${{clickFilterFn}}" title="Lọc theo kênh này">${{feedTitle}}</span>
+                <span class="badge blue" style="font-size: 0.64rem;">${{feedCat}}</span>
+                ${{isOut && item._applied_rules && item._applied_rules.length ? '<span style="font-size:0.65rem; color:#a855f7; font-weight:500;">⚡ ' + item._applied_rules.join(', ') + '</span>' : ''}}
+                ${{!isOut ? '<span class="badge" style="font-size:0.64rem; background:rgba(56,189,248,0.12); color:#38bdf8; font-weight:600;">RAW</span>' : ''}}
               </div>
               <button type="button" class="btn" onclick="toggleItemJson('${{jsonId}}')" style="height: 22px; padding: 0 7px; font-size: 0.65rem; color: var(--text-dim);" title="Xem cấu trúc JSON">
                 JSON
               </button>
             </div>
 
-            <a href="${{link}}" target="_blank" rel="noopener" style="font-size: 0.88rem; font-weight: 600; color: #f8fafc; text-decoration: none; line-height: 1.4; display: block; margin-bottom: 6px;">
+            <!-- Article Title -->
+            <a href="${{link}}" target="_blank" rel="noopener" style="font-size: 0.94rem; font-weight: 700; color: #f8fafc; text-decoration: none; line-height: 1.4; display: block; margin-bottom: 6px;">
               ${{title}}
             </a>
 
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 0.68rem; color: var(--text-dim); flex-wrap: wrap;">
+            <!-- Metadata info -->
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 0.68rem; color: var(--text-dim); flex-wrap: wrap;">
               <span>#${{idx + 1}}</span>
               ${{dateStr ? '<span>•</span><span>' + dateStr + '</span>' : ''}}
               <a href="${{link}}" target="_blank" rel="noopener" style="color: var(--text-dim); text-decoration: underline; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${{link}}</a>
             </div>
 
-            ${{truncatedSnippet ? '<div style="font-size: 0.76rem; color: var(--text-muted); line-height: 1.5; word-break: break-word;">' + truncatedSnippet + '</div>' : ''}}
-            ${{ebookBox}}
+            <!-- 1. SUMMARIZE SECTION -->
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                <span style="font-size: 0.72rem; font-weight: 700; color: ${{accentColor}}; display: inline-flex; align-items: center; gap: 4px;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                  <span>Tóm tắt nội dung</span>
+                </span>
+                ${{hasFullContentToExpand ? '<button type="button" onclick="toggleFullContent(\'' + fullTextId + '\', this)" style="background:none; border:none; color:var(--text-dim); font-size:0.68rem; cursor:pointer; text-decoration:underline;">Toàn văn ▾</button>' : ''}}
+              </div>
+              <div style="font-size: 0.78rem; color: #cbd5e1; line-height: 1.5; word-break: break-word;">${{summaryText}}</div>
+              ${{hasFullContentToExpand ? '<div id="' + fullTextId + '" style="display:none; margin-top:8px; padding-top:8px; border-top:1px dashed rgba(255,255,255,0.08); font-size:0.75rem; color:var(--text-muted); line-height:1.5; word-break: break-word;">' + cleanFullText + '</div>' : ''}}
+            </div>
+
+            <!-- 2. IMAGE & VIDEO MEDIA -->
+            ${{mediaHtml}}
+
+            <!-- 3. ATTACHMENTS & LINKS -->
+            ${{attachHtml}}
           </div>
 
-          <pre id="${{jsonId}}" style="display: none; margin-top: 10px; padding: 10px; background: #0b0f19; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; font-family: var(--mono); font-size: 0.66rem; color: #94a3b8; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all;">${{decodeURIComponent(jsonStr)}}</pre>
+          <!-- Collapsible JSON -->
+          <pre id="${{jsonId}}" style="display: none; margin-top: 12px; padding: 10px; background: #0b0f19; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; font-family: var(--mono); font-size: 0.66rem; color: #94a3b8; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all;">${{decodeURIComponent(jsonStr)}}</pre>
         </div>
       `;
     }}
@@ -3844,10 +4002,10 @@ async def dashboard(request: Request):
       }} else if (val.startsWith('http://') || val.startsWith('https://')) {{
         try {{
           const u = new URL(val);
-          if (vw) vw.value = u.hostname.replace(/^www\./, '');
+          if (vw) vw.value = u.hostname.replace(/^www\\./, '');
           const titleInp = document.getElementById('feedTitle');
           if (!titleInp.value) {{
-            let hostParts = u.hostname.replace(/^www\./, '').split('.');
+            let hostParts = u.hostname.replace(/^www\\./, '').split('.');
             let siteName = hostParts[0].charAt(0).toUpperCase() + hostParts[0].slice(1);
             let pathParts = u.pathname.split('/').filter(Boolean);
             let sub = pathParts.length > 0 ? ' - ' + pathParts[pathParts.length - 1].replace(/[-_.]/g, ' ') : '';

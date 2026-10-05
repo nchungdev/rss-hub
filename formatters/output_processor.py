@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import html
 import logging
@@ -267,12 +268,100 @@ def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: 
 
         item_desc = "".join(html_desc_parts)
 
+        # Structured attachments (Ebooks, Drive links, direct files, enclosures)
+        attachments = []
+        seen_attach_urls = set()
+
+        for glink in gdrive_links:
+            if glink not in seen_attach_urls:
+                seen_attach_urls.add(glink)
+                label = preview_title or "Google Drive Tài liệu / Ebook"
+                attachments.append({
+                    "type": "gdrive",
+                    "title": label,
+                    "url": glink,
+                    "ext": "gdrive"
+                })
+
+        extracted_links = p.get("_extracted_links", [])
+        for elink in extracted_links:
+            if elink not in seen_attach_urls:
+                seen_attach_urls.add(elink)
+                ext = elink.split(".")[-1].split("?")[0].lower() if "." in elink else "link"
+                attachments.append({
+                    "type": "extracted",
+                    "title": elink.split("/")[-1].split("?")[0] or "Liên kết trích xuất",
+                    "url": elink,
+                    "ext": ext
+                })
+
+        # Find direct file download links in text (PDF, EPUB, MOBI, AZW, ZIP, RAR, 7Z, DOCX, MP3, MP4)
+        file_pattern = r'https?://[^\s<>"\'\)]+\.(?:pdf|epub|mobi|azw3?|zip|rar|7z|docx?|xlsx?|mp3|mp4)(?:\?[^\s<>"\'\)]*)?'
+        found_file_links = re.findall(file_pattern, text, re.IGNORECASE)
+        for flink in found_file_links:
+            if flink not in seen_attach_urls:
+                seen_attach_urls.add(flink)
+                ext = flink.split(".")[-1].split("?")[0].lower()
+                fname = flink.split("/")[-1].split("?")[0]
+                attachments.append({
+                    "type": "file",
+                    "title": fname or f"Tệp tin .{ext}",
+                    "url": flink,
+                    "ext": ext
+                })
+
+        if p.get("enclosure") and isinstance(p["enclosure"], dict) and p["enclosure"].get("url"):
+            enc_url = p["enclosure"]["url"]
+            if enc_url not in seen_attach_urls:
+                seen_attach_urls.add(enc_url)
+                enc_type = p["enclosure"].get("type", "")
+                ext = enc_url.split(".")[-1].split("?")[0].lower() if "." in enc_url else (enc_type.split("/")[-1] if "/" in enc_type else "file")
+                attachments.append({
+                    "type": "enclosure",
+                    "title": p["enclosure"].get("title") or f"Tệp đính kèm ({ext.upper()})",
+                    "url": enc_url,
+                    "ext": ext
+                })
+
+        # Structured videos
+        videos = list(p.get("videos") or [])
+        if p.get("video_url") and p["video_url"] not in videos:
+            videos.append(p["video_url"])
+        if p.get("video") and p["video"] not in videos:
+            videos.append(p["video"])
+        if p.get("enclosure") and isinstance(p["enclosure"], dict) and p["enclosure"].get("type", "").startswith("video/"):
+            if p["enclosure"].get("url") and p["enclosure"]["url"] not in videos:
+                videos.append(p["enclosure"]["url"])
+        
+        # Also extract video from text/html if any <video src="..."> or <iframe src="...">
+        raw_combined = f"{text} {p.get('description', '')} {p.get('content', '')}"
+        video_srcs = re.findall(r'<(?:video|source|iframe)[^>]+src=["\']([^"\']+)["\']', raw_combined)
+        for v in video_srcs:
+            if v not in videos:
+                videos.append(v)
+
+        # Smart Summary
+        raw_text_clean = re.sub(r'<[^>]+>', ' ', text or p.get("summary") or p.get("description") or "").strip()
+        raw_text_clean = re.sub(r'\s+', ' ', raw_text_clean)
+        
+        if len(raw_text_clean) <= 220:
+            summary = raw_text_clean
+        else:
+            match = re.search(r'([.?!])\s', raw_text_clean[:280])
+            if match and match.end() > 60:
+                summary = raw_text_clean[:match.end()].strip()
+            else:
+                summary = raw_text_clean[:220].strip() + "..."
+
         # Clone and enrich original post item
         item_data = dict(p)
         item_data["_formatted_title"] = item_title
         item_data["_formatted_creator"] = creator
         item_data["_formatted_html"] = item_desc
         item_data["_formatted_images"] = images
+        item_data["_formatted_videos"] = videos
+        item_data["_summary"] = summary
+        item_data["_attachments"] = attachments
         item_data["_formatted_date"] = dt
         processed.append(item_data)
 
