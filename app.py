@@ -785,7 +785,7 @@ async def dashboard(request: Request):
         <tr class="dashboard-row" data-slug="{slug}" data-category="{cat}">
             <td style="vertical-align: middle;">
                 <div style="font-weight: 600; color: #f8fafc; font-size: 0.86rem; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                    <a href="javascript:void(0)" onclick="viewFeedPostsOnDashboard('{slug}')" style="color: #f8fafc; text-decoration: none;" title="Xem các bài viết của kênh này dưới Dashboard">{title}</a>
+                    <a href="javascript:void(0)" onclick="openFeedOutputTab('{slug}')" style="color: #f8fafc; text-decoration: none;" title="Xem Task Output sạch của kênh này">{title}</a>
                     <span class="badge gray" style="font-size: 0.62rem; padding: 1px 6px;">{cat}</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 0.7rem; color: var(--text-dim); flex-wrap: wrap;">
@@ -816,12 +816,14 @@ async def dashboard(request: Request):
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
                         <span>Cào</span>
                     </button>
-                    <button class="btn" onclick="viewFeedPostsOnDashboard('{slug}')" title="Xem danh sách bài viết dưới Dashboard" style="height: 27px; padding: 0 8px; font-size: 0.72rem; color: #10b981; border-color: rgba(16,185,129,0.3);">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                        <span>Xem</span>
+                    <button class="btn" onclick="openFeedOutputTab('{slug}')" title="Xem Task Output sạch của kênh này" style="height: 27px; padding: 0 8px; font-size: 0.72rem; color: #10b981; border-color: rgba(16,185,129,0.35);">
+                        <span>🎯 Output</span>
                     </button>
-                    <button class="btn" onclick="openCompareModal('{slug}')" id="btnDashPreview_{slug}" title="So sánh chi tiết Task Output vs RAW Data gốc" style="height: 27px; padding: 0 7px; font-size: 0.72rem; color: #38bdf8; border-color: rgba(56, 189, 248, 0.3);">
-                        <span>So sánh</span>
+                    <button class="btn" onclick="openFeedRawTab('{slug}')" title="Xem Dữ liệu RAW scrape được của kênh này" style="height: 27px; padding: 0 8px; font-size: 0.72rem; color: #38bdf8; border-color: rgba(56,189,248,0.35);">
+                        <span>📥 RAW</span>
+                    </button>
+                    <button class="btn" onclick="openCompareModal('{slug}')" id="btnDashPreview_{slug}" title="So sánh chi tiết Task Output vs RAW Data gốc" style="height: 27px; padding: 0 7px; font-size: 0.72rem; color: #fbbf24; border-color: rgba(251,191,36,0.3);">
+                        <span>⚖️</span>
                     </button>
                     <button class="btn" onclick="reprocessFeed('{slug}', this)" title="Chạy lại Rules trên RAW data không cần cào lại web" style="height: 27px; padding: 0 7px; font-size: 0.72rem; color: #a855f7; border-color: rgba(168, 85, 247, 0.3);">
                         <span>⚡</span>
@@ -1849,13 +1851,26 @@ async def dashboard(request: Request):
 
     <!-- Navigation items (TABS) -->
     <nav class="sidebar-nav">
-      <div class="nav-section-title">HỆ THỐNG</div>
+      <div class="nav-section-title">GIÁM SÁT &amp; DỮ LIỆU</div>
       <button class="nav-item active" id="navItem_dashboard" onclick="switchMainTab('dashboard')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
         <span>Dashboard</span>
         <span class="badge blue" style="margin-left: auto; font-size: 0.65rem; padding: 1px 6px;">Live</span>
       </button>
 
+      <button class="nav-item" id="navItem_output" onclick="switchMainTab('output')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <span>Task Output</span>
+        <span class="badge green" id="sidebarOutputCountBadge" style="margin-left: auto; font-size: 0.65rem; padding: 1px 6px;">{total_output_posts}</span>
+      </button>
+
+      <button class="nav-item" id="navItem_raw" onclick="switchMainTab('raw')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span>Dữ liệu RAW</span>
+        <span class="badge" id="sidebarRawCountBadge" style="margin-left: auto; font-size: 0.65rem; padding: 1px 6px; background: rgba(56,189,248,0.15); color: #38bdf8;">{total_raw_posts}</span>
+      </button>
+
+      <div class="nav-section-title" style="margin-top: 14px;">CẤU HÌNH &amp; HỆ THỐNG</div>
       <button class="nav-item" id="navItem_scrapers" onclick="switchMainTab('scrapers')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="19" r="1.5"/><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/></svg>
         <span>Quản lý Scraper</span>
@@ -1899,9 +1914,13 @@ async def dashboard(request: Request):
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 11px; height: 11px;"><circle cx="5" cy="19" r="1.5"/><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/></svg>
             <span>{len(feeds)} Scrapers</span>
           </span>
-          <span style="background: rgba(16, 185, 129, 0.12); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 999px; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; display: inline-flex; align-items: center; gap: 4px;" title="Tổng số bài viết đã cào">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 11px; height: 11px;"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-            <span>{total_posts} Bài</span>
+          <span style="background: rgba(16, 185, 129, 0.12); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 999px; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; display: inline-flex; align-items: center; gap: 4px;" title="Tổng số bài Task Output sạch">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 11px; height: 11px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            <span>{total_output_posts} Output</span>
+          </span>
+          <span style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 999px; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; display: inline-flex; align-items: center; gap: 4px;" title="Tổng số bài scrape được từ nguồn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 11px; height: 11px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>{total_raw_posts} RAW</span>
           </span>
           <span style="background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 999px; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; display: inline-flex; align-items: center; gap: 5px;" title="Gateway Online: rss.data1box.win">
             <span style="width: 6px; height: 6px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981;"></span>
@@ -1924,6 +1943,29 @@ async def dashboard(request: Request):
           <button class="btn primary" onclick="refreshAllFeeds()" title="Cào mới tất cả các scraper ngay" style="height: 32px; font-size: 0.76rem;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
             <span>Cào mới tất cả</span>
+          </button>
+        </div>
+
+        <!-- Task Output Actions -->
+        <div id="topbarActions_output" style="display: none; align-items: center; gap: 8px;">
+          <button class="btn" onclick="reprocessAllFeeds(this)" title="Chạy lại toàn bộ Rules trên dữ liệu RAW của tất cả scraper" style="height: 32px; font-size: 0.76rem; color: #a855f7; border-color: rgba(168, 85, 247, 0.35);">
+            <span>⚡ Re-process Rules</span>
+          </button>
+          <button class="btn" onclick="reloadAllPostsData()" title="Làm mới lại dữ liệu bài viết" style="height: 32px; font-size: 0.76rem;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            <span>Làm mới</span>
+          </button>
+        </div>
+
+        <!-- RAW Data Actions -->
+        <div id="topbarActions_raw" style="display: none; align-items: center; gap: 8px;">
+          <button class="btn primary" onclick="refreshAllFeeds()" title="Cào mới tất cả các scraper ngay" style="height: 32px; font-size: 0.76rem;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            <span>Cào mới tất cả</span>
+          </button>
+          <button class="btn" onclick="reloadAllPostsData()" title="Làm mới lại dữ liệu bài viết" style="height: 32px; font-size: 0.76rem;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            <span>Làm mới</span>
           </button>
         </div>
 
@@ -1965,7 +2007,7 @@ async def dashboard(request: Request):
       <div id="view_dashboard" class="main-tab-content">
         <!-- Quick KPI Strip -->
         <div class="kpi-strip" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
-          <div class="kpi-box">
+          <div class="kpi-box clickable" onclick="switchMainTab('scrapers')" style="cursor: pointer;" title="Bấm để xem danh sách Scraper">
             <div class="kpi-icon" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><circle cx="5" cy="19" r="1.5"/><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/></svg>
             </div>
@@ -1974,7 +2016,7 @@ async def dashboard(request: Request):
               <div class="kpi-val">{len(feeds)} Kênh</div>
             </div>
           </div>
-          <div class="kpi-box">
+          <div class="kpi-box clickable" onclick="switchMainTab('output')" style="cursor: pointer;" title="Bấm để xem toàn bộ danh sách Task Output sạch">
             <div class="kpi-icon" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             </div>
@@ -1983,7 +2025,7 @@ async def dashboard(request: Request):
               <div class="kpi-val">{total_output_posts} Bài</div>
             </div>
           </div>
-          <div class="kpi-box">
+          <div class="kpi-box clickable" onclick="switchMainTab('raw')" style="cursor: pointer;" title="Bấm để xem toàn bộ dữ liệu cào RAW">
             <div class="kpi-icon" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             </div>
@@ -2036,83 +2078,137 @@ async def dashboard(request: Request):
           </div>
         </div>
 
-        <!-- DASHBOARD POSTS EXPLORER: TASK OUTPUT & SCRAPED LIST -->
-        <div id="dashboardExplorer" class="dashboard-explorer-section" style="margin-top: 24px;">
-          <!-- Explorer Header & Action Toolbar -->
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; flex-wrap: wrap;">
-            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 0.95rem; font-weight: 700; color: #fff;">📑 Dòng chảy Bài viết &amp; Output</span>
-                <span class="badge blue" id="dashTotalStatsBadge" style="font-size: 0.68rem;">Đang tải...</span>
+        <!-- DASHBOARD DATA CHANNELS QUICK NAVIGATION -->
+        <div style="margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;">
+          <!-- Card 1: Task Output Shortcut -->
+          <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; justify-content: space-between; gap: 14px;">
+            <div>
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.95rem; color: #10b981;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <span>Task Output (Dữ liệu Sạch sau Rule)</span>
+                </div>
+                <span class="badge green" style="font-size: 0.72rem; font-weight: 600;">{total_output_posts} bài</span>
               </div>
-              
-              <!-- View Mode Switcher -->
-              <div style="display: inline-flex; background: rgba(255,255,255,0.04); padding: 3px; border-radius: 8px; border: 1px solid var(--card-border); gap: 2px;">
-                <button type="button" class="btn-toggle active" id="btnDashViewSplit" onclick="setDashboardViewMode('split')" style="height: 26px; padding: 0 9px; font-size: 0.72rem; border-radius: 5px; cursor: pointer;" title="Xem song song 2 cột: Task Output &amp; RAW Scraped">
-                  <span>👥 Song song (2 Cột)</span>
-                </button>
-                <button type="button" class="btn-toggle" id="btnDashViewOutput" onclick="setDashboardViewMode('output')" style="height: 26px; padding: 0 9px; font-size: 0.72rem; border-radius: 5px; cursor: pointer;" title="Chỉ hiển thị Task Output sau Rule">
-                  <span>🎯 Task Output</span>
-                  <span class="pill-count" id="dashOutputBadge" style="margin-left: 3px; font-size: 0.65rem;">0</span>
-                </button>
-                <button type="button" class="btn-toggle" id="btnDashViewScraped" onclick="setDashboardViewMode('scraped')" style="height: 26px; padding: 0 9px; font-size: 0.72rem; border-radius: 5px; cursor: pointer;" title="Chỉ hiển thị Task Chứa List Scrape Được">
-                  <span>📥 List Scrape Được (RAW)</span>
-                  <span class="pill-count" id="dashScrapedBadge" style="margin-left: 3px; font-size: 0.65rem;">0</span>
-                </button>
-              </div>
+              <p style="font-size: 0.76rem; color: var(--text-muted); line-height: 1.5; margin: 0;">
+                Dữ liệu bài viết sau khi xử lý qua bộ quy tắc (Rule Engine): loại bỏ spam/CTA, gọt link rút gọn, trích xuất kho tài liệu Google Drive, tối ưu định dạng RSS.
+              </p>
             </div>
-
-            <!-- Explorer Filters -->
-            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-              <select id="dashFeedFilter" class="form-input" style="height: 30px; font-size: 0.74rem; width: 180px;" onchange="onDashFeedFilterChange(this.value)">
-                <option value="all">🔍 Tất cả Kênh / Scraper</option>
-              </select>
-              <input type="text" id="dashPostSearch" class="form-input" placeholder="🔍 Lọc tiêu đề / nội dung..." style="height: 30px; font-size: 0.74rem; width: 180px;" oninput="onDashPostSearch(this.value)">
-              <button type="button" class="btn" onclick="reloadDashboardPosts()" style="height: 30px; padding: 0 10px; font-size: 0.72rem;" title="Làm mới lại dữ liệu bài viết">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-                <span>Làm mới</span>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px;">
+              <span style="font-size: 0.72rem; color: var(--text-dim);">Sẵn sàng xuất XML, JSON, ATOM</span>
+              <button type="button" class="btn" onclick="switchMainTab('output')" style="height: 28px; padding: 0 12px; font-size: 0.74rem; color: #10b981; border-color: rgba(16,185,129,0.35);">
+                <span>Xem Tab Task Output →</span>
               </button>
             </div>
           </div>
 
-          <!-- Dual Tasks Posts Container -->
-          <div id="dashPostsGrid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-            
-            <!-- TASK 1: List Task Output sau khi qua Rule -->
-            <div class="task-card" id="dashCardOutput" style="display: flex; flex-direction: column; max-height: 800px; padding: 14px; margin: 0; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px;">
-              <div style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid var(--card-border); gap: 8px;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span style="font-size: 0.88rem; font-weight: 700; color: #10b981; display: flex; align-items: center; gap: 6px;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                    <span>🎯 Task Output (Sau Rule Engine)</span>
-                  </span>
-                  <span class="badge green" id="dashCardOutputHeaderCount" style="font-size: 0.68rem;">0 bài</span>
+          <!-- Card 2: RAW Scraped Shortcut -->
+          <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; justify-content: space-between; gap: 14px;">
+            <div>
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.95rem; color: #38bdf8;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  <span>Dữ Liệu Scrape Được (RAW)</span>
                 </div>
-                <div style="font-size: 0.7rem; color: var(--text-dim);" id="dashOutputFilterStatus">Tất cả kênh</div>
+                <span class="badge blue" style="font-size: 0.72rem; font-weight: 600;">{total_raw_posts} bài</span>
               </div>
-              <div id="dashOutputList" style="flex: 1; overflow-y: auto; padding: 10px 0; display: flex; flex-direction: column; gap: 10px; min-height: 200px;">
-                <div style="text-align: center; padding: 30px; color: var(--text-dim);">Đang tải dữ liệu Task Output...</div>
-              </div>
+              <p style="font-size: 0.76rem; color: var(--text-muted); line-height: 1.5; margin: 0;">
+                Dữ liệu thô thu thập trực tiếp từ các scraper nguồn (Threads, Web scraper, RSSHub) trước khi áp dụng rule. Hỗ trợ đối soát và kiểm tra bài viết gốc.
+              </p>
             </div>
-
-            <!-- TASK 2: Task Chứa List Scrape Được (RAW) -->
-            <div class="task-card" id="dashCardScraped" style="display: flex; flex-direction: column; max-height: 800px; padding: 14px; margin: 0; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px;">
-              <div style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid var(--card-border); gap: 8px;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span style="font-size: 0.88rem; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 6px;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    <span>📥 Task Chứa List Scrape Được (RAW Data)</span>
-                  </span>
-                  <span class="badge blue" id="dashCardScrapedHeaderCount" style="font-size: 0.68rem;">0 bài</span>
-                </div>
-                <div style="font-size: 0.7rem; color: var(--text-dim);" id="dashScrapedFilterStatus">Dữ liệu thô từ nguồn</div>
-              </div>
-              <div id="dashScrapedList" style="flex: 1; overflow-y: auto; padding: 10px 0; display: flex; flex-direction: column; gap: 10px; min-height: 200px;">
-                <div style="text-align: center; padding: 30px; color: var(--text-dim);">Đang tải dữ liệu scrape được...</div>
-              </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px;">
+              <span style="font-size: 0.72rem; color: var(--text-dim);">Lưu trữ trong cache /data/</span>
+              <button type="button" class="btn" onclick="switchMainTab('raw')" style="height: 28px; padding: 0 12px; font-size: 0.74rem; color: #38bdf8; border-color: rgba(56,189,248,0.35);">
+                <span>Xem Tab Dữ liệu RAW →</span>
+              </button>
             </div>
-
           </div>
+        </div>
+      </div>
+
+      <!-- TAB: TASK OUTPUT (Dữ liệu sạch sau Rule Engine) -->
+      <div id="view_output" class="main-tab-content" style="display: none;">
+        <!-- Controls & Filters Bar -->
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 12px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 1rem; font-weight: 700; color: #10b981; display: inline-flex; align-items: center; gap: 6px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                <span>Task Output (Đã qua Rule Engine)</span>
+              </span>
+              <span class="badge green" id="outputTabBadge" style="font-size: 0.72rem; font-weight: 600;">{total_output_posts} bài</span>
+            </div>
+            <span style="font-size: 0.74rem; color: var(--text-dim);" id="outputFilterStatus">Tất cả kênh</span>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <!-- Layout toggle -->
+            <div style="display: inline-flex; background: rgba(255,255,255,0.04); padding: 2px; border-radius: 6px; border: 1px solid var(--card-border); gap: 2px;">
+              <button type="button" class="btn-toggle active" id="btnOutputLayoutGrid" onclick="setOutputViewLayout('grid')" style="height: 26px; padding: 0 8px; font-size: 0.7rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng lưới">
+                <span>Lưới</span>
+              </button>
+              <button type="button" class="btn-toggle" id="btnOutputLayoutList" onclick="setOutputViewLayout('list')" style="height: 26px; padding: 0 8px; font-size: 0.7rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng danh sách dọc">
+                <span>Dọc</span>
+              </button>
+            </div>
+
+            <select id="outputFeedFilter" class="form-input" style="height: 32px; font-size: 0.76rem; width: 190px;" onchange="onOutputFeedFilterChange(this.value)">
+              <option value="all">🔍 Tất cả Kênh Feed</option>
+            </select>
+            <input type="text" id="outputPostSearch" class="form-input" placeholder="🔍 Tìm kiếm bài viết..." style="height: 32px; font-size: 0.76rem; width: 190px;" oninput="onOutputPostSearch(this.value)">
+            <button type="button" class="btn" onclick="reloadAllPostsData()" style="height: 32px; padding: 0 10px; font-size: 0.74rem;" title="Làm mới lại dữ liệu">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>Làm mới</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Output Posts Container (Responsive grid) -->
+        <div id="outputPostsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px;">
+          <div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-dim);">Đang tải dữ liệu Task Output...</div>
+        </div>
+      </div>
+
+      <!-- TAB: DỮ LIỆU CÀO RAW (Dữ liệu gốc từ Scrapers) -->
+      <div id="view_raw" class="main-tab-content" style="display: none;">
+        <!-- Controls & Filters Bar -->
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 12px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 1rem; font-weight: 700; color: #38bdf8; display: inline-flex; align-items: center; gap: 6px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Dữ Liệu Scrape Được (RAW Data)</span>
+              </span>
+              <span class="badge blue" id="rawTabBadge" style="font-size: 0.72rem; font-weight: 600;">{total_raw_posts} bài</span>
+            </div>
+            <span style="font-size: 0.74rem; color: var(--text-dim);" id="rawFilterStatus">Dữ liệu thô từ nguồn cào</span>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <!-- Layout toggle -->
+            <div style="display: inline-flex; background: rgba(255,255,255,0.04); padding: 2px; border-radius: 6px; border: 1px solid var(--card-border); gap: 2px;">
+              <button type="button" class="btn-toggle active" id="btnRawLayoutGrid" onclick="setRawViewLayout('grid')" style="height: 26px; padding: 0 8px; font-size: 0.7rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng lưới">
+                <span>Lưới</span>
+              </button>
+              <button type="button" class="btn-toggle" id="btnRawLayoutList" onclick="setRawViewLayout('list')" style="height: 26px; padding: 0 8px; font-size: 0.7rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng danh sách dọc">
+                <span>Dọc</span>
+              </button>
+            </div>
+
+            <select id="rawFeedFilter" class="form-input" style="height: 32px; font-size: 0.76rem; width: 190px;" onchange="onRawFeedFilterChange(this.value)">
+              <option value="all">🔍 Tất cả Kênh Feed</option>
+            </select>
+            <input type="text" id="rawPostSearch" class="form-input" placeholder="🔍 Tìm kiếm bài viết gốc..." style="height: 32px; font-size: 0.76rem; width: 190px;" oninput="onRawPostSearch(this.value)">
+            <button type="button" class="btn" onclick="reloadAllPostsData()" style="height: 32px; padding: 0 10px; font-size: 0.74rem;" title="Làm mới lại dữ liệu">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>Làm mới</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Raw Posts Container (Responsive grid) -->
+        <div id="rawPostsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px;">
+          <div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-dim);">Đang tải dữ liệu Scraped RAW...</div>
         </div>
       </div>
 
@@ -3271,155 +3367,195 @@ async def dashboard(request: Request):
         }});
     }}
 
-    // DASHBOARD CONTENT EXPLORER (TASK OUTPUT & SCRAPED LIST)
+    // POSTS DATA & EXPLORER FOR OUTPUT AND RAW TABS
     let dashAllOutputPosts = [];
     let dashAllRawPosts = [];
-    let currentDashViewMode = 'split';
-    let currentDashFeedFilter = 'all';
-    let currentDashSearchQuery = '';
+    let currentOutputFeedFilter = 'all';
+    let currentOutputSearchQuery = '';
+    let currentRawFeedFilter = 'all';
+    let currentRawSearchQuery = '';
+    let outputViewMode = 'grid'; // 'grid' | 'list'
+    let rawViewMode = 'grid'; // 'grid' | 'list'
 
-    function setDashboardViewMode(mode) {{
-      currentDashViewMode = mode;
-      const btnSplit = document.getElementById('btnDashViewSplit');
-      const btnOut = document.getElementById('btnDashViewOutput');
-      const btnScraped = document.getElementById('btnDashViewScraped');
-      const grid = document.getElementById('dashPostsGrid');
-      const cardOut = document.getElementById('dashCardOutput');
-      const cardScraped = document.getElementById('dashCardScraped');
-
-      if (!grid || !cardOut || !cardScraped) return;
-
-      if (btnSplit) btnSplit.classList.toggle('active', mode === 'split');
-      if (btnOut) btnOut.classList.toggle('active', mode === 'output');
-      if (btnScraped) btnScraped.classList.toggle('active', mode === 'scraped');
-
-      if (mode === 'split') {{
-        grid.style.gridTemplateColumns = (window.innerWidth < 992) ? '1fr' : '1fr 1fr';
-        cardOut.style.display = 'flex';
-        cardScraped.style.display = 'flex';
-      }} else if (mode === 'output') {{
-        grid.style.gridTemplateColumns = '1fr';
-        cardOut.style.display = 'flex';
-        cardScraped.style.display = 'none';
-      }} else if (mode === 'scraped') {{
-        grid.style.gridTemplateColumns = '1fr';
-        cardOut.style.display = 'none';
-        cardScraped.style.display = 'flex';
+    function setOutputViewLayout(mode) {{
+      outputViewMode = mode;
+      const container = document.getElementById('outputPostsList');
+      const btnGrid = document.getElementById('btnOutputLayoutGrid');
+      const btnList = document.getElementById('btnOutputLayoutList');
+      if (container) {{
+        container.style.gridTemplateColumns = mode === 'list' ? '1fr' : 'repeat(auto-fill, minmax(360px, 1fr))';
+      }}
+      if (btnGrid && btnList) {{
+        btnGrid.classList.toggle('active', mode === 'grid');
+        btnList.classList.toggle('active', mode === 'list');
       }}
     }}
 
-    function onDashFeedFilterChange(val) {{
-      currentDashFeedFilter = val;
-      const sel = document.getElementById('dashFeedFilter');
+    function setRawViewLayout(mode) {{
+      rawViewMode = mode;
+      const container = document.getElementById('rawPostsList');
+      const btnGrid = document.getElementById('btnRawLayoutGrid');
+      const btnList = document.getElementById('btnRawLayoutList');
+      if (container) {{
+        container.style.gridTemplateColumns = mode === 'list' ? '1fr' : 'repeat(auto-fill, minmax(360px, 1fr))';
+      }}
+      if (btnGrid && btnList) {{
+        btnGrid.classList.toggle('active', mode === 'grid');
+        btnList.classList.toggle('active', mode === 'list');
+      }}
+    }}
+
+    function onOutputFeedFilterChange(val) {{
+      currentOutputFeedFilter = val;
+      const sel = document.getElementById('outputFeedFilter');
       if (sel && sel.value !== val) sel.value = val;
-      renderDashboardPostsLists();
+      renderOutputPostsList();
+    }}
+
+    function onOutputPostSearch(val) {{
+      currentOutputSearchQuery = (val || '').toLowerCase().trim();
+      renderOutputPostsList();
+    }}
+
+    function onRawFeedFilterChange(val) {{
+      currentRawFeedFilter = val;
+      const sel = document.getElementById('rawFeedFilter');
+      if (sel && sel.value !== val) sel.value = val;
+      renderRawPostsList();
+    }}
+
+    function onRawPostSearch(val) {{
+      currentRawSearchQuery = (val || '').toLowerCase().trim();
+      renderRawPostsList();
+    }}
+
+    function openFeedOutputTab(slug) {{
+      switchMainTab('output');
+      onOutputFeedFilterChange(slug);
+      window.scrollTo({{ top: 0, behavior: 'smooth' }});
+    }}
+
+    function openFeedRawTab(slug) {{
+      switchMainTab('raw');
+      onRawFeedFilterChange(slug);
+      window.scrollTo({{ top: 0, behavior: 'smooth' }});
     }}
 
     function viewFeedPostsOnDashboard(slug) {{
-      onDashFeedFilterChange(slug);
-      const explorer = document.getElementById('dashboardExplorer');
-      if (explorer) {{
-        explorer.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
-      }}
+      openFeedOutputTab(slug);
     }}
 
-    function onDashPostSearch(val) {{
-      currentDashSearchQuery = (val || '').toLowerCase().trim();
-      renderDashboardPostsLists();
-    }}
-
-    function reloadDashboardPosts() {{
-      const outList = document.getElementById('dashOutputList');
-      const scrapedList = document.getElementById('dashScrapedList');
-      if (outList) outList.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-dim);"><svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-bottom: 8px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><br>Đang tải Task Output...</div>';
-      if (scrapedList) scrapedList.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-dim);"><svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-bottom: 8px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><br>Đang tải dữ liệu scrape được...</div>';
+    function reloadAllPostsData() {{
+      const outList = document.getElementById('outputPostsList');
+      const rawList = document.getElementById('rawPostsList');
+      if (outList) outList.innerHTML = '<div style="grid-column: 1 / -1; text-align:center; padding:40px; color:var(--text-dim);"><svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-bottom: 8px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><br>Đang tải dữ liệu Task Output...</div>';
+      if (rawList) rawList.innerHTML = '<div style="grid-column: 1 / -1; text-align:center; padding:40px; color:var(--text-dim);"><svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-bottom: 8px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><br>Đang tải dữ liệu Scraped RAW...</div>';
 
       fetch('/api/dashboard/posts?slug=all')
         .then(r => {{
-          if (!r.ok) throw new Error('Không thể tải dữ liệu dashboard posts');
+          if (!r.ok) throw new Error('Không thể tải dữ liệu posts');
           return r.json();
         }})
         .then(d => {{
           dashAllOutputPosts = d.output_posts || [];
           dashAllRawPosts = d.raw_posts || [];
 
-          const sel = document.getElementById('dashFeedFilter');
-          if (sel && sel.options.length <= 1 && d.feeds_summary) {{
-            d.feeds_summary.forEach(f => {{
-              const opt = document.createElement('option');
-              opt.value = f.slug;
-              opt.innerText = '[' + f.category + '] ' + f.title;
-              sel.appendChild(opt);
-            }});
+          // Populate select dropdowns
+          const outSel = document.getElementById('outputFeedFilter');
+          const rawSel = document.getElementById('rawFeedFilter');
+          if (d.feeds_summary) {{
+            if (outSel && outSel.options.length <= 1) {{
+              d.feeds_summary.forEach(f => {{
+                const opt = document.createElement('option');
+                opt.value = f.slug;
+                opt.innerText = '[' + f.category + '] ' + f.title + ' (' + f.output_count + ' bài)';
+                outSel.appendChild(opt);
+              }});
+            }}
+            if (rawSel && rawSel.options.length <= 1) {{
+              d.feeds_summary.forEach(f => {{
+                const opt = document.createElement('option');
+                opt.value = f.slug;
+                opt.innerText = '[' + f.category + '] ' + f.title + ' (' + f.count + ' bài)';
+                rawSel.appendChild(opt);
+              }});
+            }}
           }}
 
           const totalOut = dashAllOutputPosts.length;
           const totalRaw = dashAllRawPosts.length;
-          const statBadge = document.getElementById('dashTotalStatsBadge');
-          if (statBadge) statBadge.innerText = totalOut + ' output / ' + totalRaw + ' raw';
 
-          const outBadge = document.getElementById('dashOutputBadge');
-          if (outBadge) outBadge.innerText = totalOut;
-          const scBadge = document.getElementById('dashScrapedBadge');
-          if (scBadge) scBadge.innerText = totalRaw;
+          // Update badges
+          const sideOut = document.getElementById('sidebarOutputCountBadge');
+          if (sideOut) sideOut.innerText = totalOut;
+          const sideRaw = document.getElementById('sidebarRawCountBadge');
+          if (sideRaw) sideRaw.innerText = totalRaw;
 
-          renderDashboardPostsLists();
+          renderOutputPostsList();
+          renderRawPostsList();
         }})
         .catch(err => {{
           console.error(err);
-          if (outList) outList.innerHTML = '<div style="text-align:center; padding:20px; color:#f87171;">Lỗi tải dữ liệu: ' + err + '</div>';
-          if (scrapedList) scrapedList.innerHTML = '<div style="text-align:center; padding:20px; color:#f87171;">Lỗi tải dữ liệu: ' + err + '</div>';
+          if (outList) outList.innerHTML = '<div style="grid-column: 1 / -1; text-align:center; padding:30px; color:#f87171;">Lỗi tải dữ liệu: ' + err + '</div>';
+          if (rawList) rawList.innerHTML = '<div style="grid-column: 1 / -1; text-align:center; padding:30px; color:#f87171;">Lỗi tải dữ liệu: ' + err + '</div>';
         }});
     }}
 
-    function renderDashboardPostsLists() {{
-      const q = currentDashSearchQuery;
-      const feed = currentDashFeedFilter;
+    const reloadDashboardPosts = reloadAllPostsData;
 
-      let filteredOutput = dashAllOutputPosts.filter(p => {{
+    function renderOutputPostsList() {{
+      const q = currentOutputSearchQuery;
+      const feed = currentOutputFeedFilter;
+
+      let filtered = dashAllOutputPosts.filter(p => {{
         if (feed !== 'all' && p._feed_slug !== feed) return false;
         if (!q) return true;
         const text = (p._formatted_title || p.title || p.preview_title || '') + ' ' + (p._formatted_html || p.text || p.content || '') + ' ' + (p._feed_title || '') + ' ' + (p.url || '');
         return text.toLowerCase().includes(q);
       }});
 
-      let filteredRaw = dashAllRawPosts.filter(p => {{
+      const badge = document.getElementById('outputTabBadge');
+      if (badge) badge.innerText = filtered.length + ' bài' + (feed !== 'all' ? ' (Lọc)' : '');
+      const statusEl = document.getElementById('outputFilterStatus');
+      if (statusEl) statusEl.innerText = (feed === 'all' ? 'Tất cả kênh' : feed) + (q ? ' • Tìm: "' + q + '"' : '');
+
+      const outList = document.getElementById('outputPostsList');
+      if (outList) {{
+        if (filtered.length === 0) {{
+          outList.innerHTML = '<div style="grid-column: 1 / -1; text-align:center; padding:48px; color:var(--text-dim); background:var(--card-bg); border-radius:12px; border:1px dashed var(--card-border);">Không có bài viết output nào phù hợp với bộ lọc.</div>';
+        }} else {{
+          outList.innerHTML = filtered.map((item, idx) => renderPostCard(item, idx, 'output')).join('');
+        }}
+      }}
+    }}
+
+    function renderRawPostsList() {{
+      const q = currentRawSearchQuery;
+      const feed = currentRawFeedFilter;
+
+      let filtered = dashAllRawPosts.filter(p => {{
         if (feed !== 'all' && p._feed_slug !== feed) return false;
         if (!q) return true;
         const text = (p.preview_title || p.title || p.text || '') + ' ' + (p.url || '') + ' ' + (p._feed_title || '');
         return text.toLowerCase().includes(q);
       }});
 
-      const hOut = document.getElementById('dashCardOutputHeaderCount');
-      if (hOut) hOut.innerText = filteredOutput.length + ' bài' + (feed !== 'all' ? ' (Lọc)' : '');
-      const hRaw = document.getElementById('dashCardScrapedHeaderCount');
-      if (hRaw) hRaw.innerText = filteredRaw.length + ' bài' + (feed !== 'all' ? ' (Lọc)' : '');
+      const badge = document.getElementById('rawTabBadge');
+      if (badge) badge.innerText = filtered.length + ' bài' + (feed !== 'all' ? ' (Lọc)' : '');
+      const statusEl = document.getElementById('rawFilterStatus');
+      if (statusEl) statusEl.innerText = (feed === 'all' ? 'Tất cả kênh' : feed) + (q ? ' • Tìm: "' + q + '"' : '');
 
-      const sOut = document.getElementById('dashOutputFilterStatus');
-      if (sOut) sOut.innerText = (feed === 'all' ? 'Tất cả kênh' : feed) + (q ? ' • Tìm: "' + q + '"' : '');
-      const sRaw = document.getElementById('dashScrapedFilterStatus');
-      if (sRaw) sRaw.innerText = (feed === 'all' ? 'Tất cả kênh' : feed) + (q ? ' • Tìm: "' + q + '"' : '');
-
-      const outList = document.getElementById('dashOutputList');
-      if (outList) {{
-        if (filteredOutput.length === 0) {{
-          outList.innerHTML = '<div style="text-align:center; padding:32px; color:var(--text-dim); background:rgba(255,255,255,0.02); border-radius:8px; border:1px dashed var(--card-border);">Không có bài viết output nào phù hợp với bộ lọc.</div>';
+      const rawList = document.getElementById('rawPostsList');
+      if (rawList) {{
+        if (filtered.length === 0) {{
+          rawList.innerHTML = '<div style="grid-column: 1 / -1; text-align:center; padding:48px; color:var(--text-dim); background:var(--card-bg); border-radius:12px; border:1px dashed var(--card-border);">Không có bài viết RAW nào phù hợp với bộ lọc.</div>';
         }} else {{
-          outList.innerHTML = filteredOutput.map((item, idx) => renderDashPostItem(item, idx, 'output')).join('');
-        }}
-      }}
-
-      const scList = document.getElementById('dashScrapedList');
-      if (scList) {{
-        if (filteredRaw.length === 0) {{
-          scList.innerHTML = '<div style="text-align:center; padding:32px; color:var(--text-dim); background:rgba(255,255,255,0.02); border-radius:8px; border:1px dashed var(--card-border);">Không có bài viết cào nào phù hợp với bộ lọc.</div>';
-        }} else {{
-          scList.innerHTML = filteredRaw.map((item, idx) => renderDashPostItem(item, idx, 'raw')).join('');
+          rawList.innerHTML = filtered.map((item, idx) => renderPostCard(item, idx, 'raw')).join('');
         }}
       }}
     }}
 
-    function renderDashPostItem(item, idx, type) {{
+    function renderPostCard(item, idx, type) {{
       const isOut = type === 'output';
       const feedSlug = item._feed_slug || '';
       const feedTitle = item._feed_title || feedSlug;
@@ -3435,7 +3571,7 @@ async def dashboard(request: Request):
         ? (item._formatted_html || item.content || item.description || item.text || item.summary || '')
         : (item.text || item.description || item.content || item.summary || item._formatted_html || '');
 
-      const jsonId = 'dash_' + type + '_' + idx;
+      const jsonId = 'post_' + type + '_' + idx;
       const jsonStr = encodeURIComponent(JSON.stringify(item, null, 2));
 
       let ebookBox = '';
@@ -3443,7 +3579,7 @@ async def dashboard(request: Request):
       if (isOut) {{
         if (item.enclosure && item.enclosure.url) {{
           ebookBox = `
-            <div style="margin-top: 8px; padding: 6px 8px; background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap;">
+            <div style="margin-top: 8px; padding: 6px 10px; background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap;">
               <div style="display: flex; align-items: center; gap: 4px; font-size: 0.72rem; color: #10b981; font-weight: 500;">
                 <span>📥 Enclosure:</span>
                 <a href="${{item.enclosure.url}}" target="_blank" rel="noopener" style="color: #34d399; text-decoration: underline; word-break: break-all;">${{item.enclosure.url}}</a>
@@ -3454,7 +3590,7 @@ async def dashboard(request: Request):
         }} else if (driveList.length > 0) {{
           const linksHtml = driveList.map(l => `<a href="${{l}}" target="_blank" rel="noopener" style="color: #10b981; text-decoration: underline; margin-right: 6px; font-size: 0.7rem; word-break: break-all;">📚 ${{l}}</a>`).join('');
           ebookBox = `
-            <div style="margin-top: 6px; padding: 6px 8px; background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: 6px; font-size: 0.72rem;">
+            <div style="margin-top: 8px; padding: 6px 10px; background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: 6px; font-size: 0.72rem;">
               <div style="font-weight: 600; color: #10b981; margin-bottom: 3px;">📥 Kho Ebook / Tài liệu:</div>
               <div>${{linksHtml}}</div>
             </div>
@@ -3465,33 +3601,40 @@ async def dashboard(request: Request):
       const tempDiv = document.createElement('div');
       tempDiv.innerHTML = content;
       const cleanSnippet = tempDiv.textContent || tempDiv.innerText || '';
-      const truncatedSnippet = cleanSnippet.length > 160 ? cleanSnippet.slice(0, 160) + '...' : cleanSnippet;
+      const truncatedSnippet = cleanSnippet.length > 200 ? cleanSnippet.slice(0, 200) + '...' : cleanSnippet;
+
+      const clickFilterFn = isOut ? `onOutputFeedFilterChange('${{feedSlug}}')` : `onRawFeedFilterChange('${{feedSlug}}')`;
 
       return `
-        <div style="padding: 10px 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 8px; transition: border-color 0.15s;">
-          <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
-            <div style="flex: 1; min-width: 0;">
-              <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px; flex-wrap: wrap;">
-                <span class="badge gray" style="font-size: 0.65rem; cursor: pointer;" onclick="onDashFeedFilterChange('${{feedSlug}}')" title="Lọc theo kênh này">${{feedTitle}}</span>
+        <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; justify-content: space-between; transition: all 0.15s ease;">
+          <div>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                <span class="badge gray" style="font-size: 0.65rem; cursor: pointer;" onclick="${{clickFilterFn}}" title="Lọc theo kênh này">${{feedTitle}}</span>
                 <span class="badge blue" style="font-size: 0.62rem;">${{feedCat}}</span>
                 ${{isOut && item._applied_rules && item._applied_rules.length ? '<span style="font-size:0.65rem; color:#a855f7;">⚡ ' + item._applied_rules.join(', ') + '</span>' : ''}}
+                ${{!isOut ? '<span class="badge" style="font-size:0.62rem; background:rgba(56,189,248,0.12); color:#38bdf8;">RAW</span>' : ''}}
               </div>
-              <a href="${{link}}" target="_blank" rel="noopener" style="font-size: 0.82rem; font-weight: 600; color: #f8fafc; text-decoration: none; line-height: 1.35; display: inline-block;">
-                ${{title}}
-              </a>
-              <div style="display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 0.68rem; color: var(--text-dim); flex-wrap: wrap;">
-                <span>#${{idx + 1}}</span>
-                ${{dateStr ? '<span>•</span><span>' + dateStr + '</span>' : ''}}
-                <a href="${{link}}" target="_blank" rel="noopener" style="color: var(--text-dim); text-decoration: underline; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${{link}}</a>
-              </div>
+              <button type="button" class="btn" onclick="toggleItemJson('${{jsonId}}')" style="height: 22px; padding: 0 7px; font-size: 0.65rem; color: var(--text-dim);" title="Xem cấu trúc JSON">
+                JSON
+              </button>
             </div>
-            <button type="button" class="btn" onclick="toggleItemJson('${{jsonId}}')" style="height: 22px; padding: 0 7px; font-size: 0.65rem; color: var(--text-dim);" title="Xem cấu trúc JSON">
-              JSON
-            </button>
+
+            <a href="${{link}}" target="_blank" rel="noopener" style="font-size: 0.88rem; font-weight: 600; color: #f8fafc; text-decoration: none; line-height: 1.4; display: block; margin-bottom: 6px;">
+              ${{title}}
+            </a>
+
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 0.68rem; color: var(--text-dim); flex-wrap: wrap;">
+              <span>#${{idx + 1}}</span>
+              ${{dateStr ? '<span>•</span><span>' + dateStr + '</span>' : ''}}
+              <a href="${{link}}" target="_blank" rel="noopener" style="color: var(--text-dim); text-decoration: underline; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${{link}}</a>
+            </div>
+
+            ${{truncatedSnippet ? '<div style="font-size: 0.76rem; color: var(--text-muted); line-height: 1.5; word-break: break-word;">' + truncatedSnippet + '</div>' : ''}}
+            ${{ebookBox}}
           </div>
-          ${{truncatedSnippet ? '<div style="margin-top: 6px; font-size: 0.74rem; color: var(--text-muted); line-height: 1.4; word-break: break-word;">' + truncatedSnippet + '</div>' : ''}}
-          ${{ebookBox}}
-          <pre id="${{jsonId}}" style="display: none; margin-top: 8px; padding: 8px; background: #0b0f19; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; font-family: var(--mono); font-size: 0.66rem; color: #94a3b8; max-height: 200px; overflow: auto; white-space: pre-wrap; word-break: break-all;">${{decodeURIComponent(jsonStr)}}</pre>
+
+          <pre id="${{jsonId}}" style="display: none; margin-top: 10px; padding: 10px; background: #0b0f19; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; font-family: var(--mono); font-size: 0.66rem; color: #94a3b8; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all;">${{decodeURIComponent(jsonStr)}}</pre>
         </div>
       `;
     }}
@@ -4261,7 +4404,7 @@ async def dashboard(request: Request):
 
     // TAB NAVIGATION & STATE
     function switchMainTab(tab, updateHash = true) {{
-      const validTabs = ['dashboard', 'scrapers', 'profiles', 'rules'];
+      const validTabs = ['dashboard', 'output', 'raw', 'scrapers', 'profiles', 'rules'];
       if (!validTabs.includes(tab)) tab = 'dashboard';
 
       // Update sidebar nav items
@@ -4293,6 +4436,8 @@ async def dashboard(request: Request):
       const titleEl = document.getElementById('mainPageTitle');
       if (titleEl) {{
         if (tab === 'dashboard') titleEl.innerText = 'Dashboard & Giám sát Lượt cào';
+        else if (tab === 'output') titleEl.innerText = 'Task Output (Dữ liệu sạch sau Rule)';
+        else if (tab === 'raw') titleEl.innerText = 'Dữ liệu Scrape Được (RAW Data từ Nguồn)';
         else if (tab === 'scrapers') titleEl.innerText = 'Quản lý Scraper & Kênh Feed';
         else if (tab === 'profiles') titleEl.innerText = 'Quản lý Profile & Xác thực Domain';
         else if (tab === 'rules') titleEl.innerText = 'Quản lý Rule & Xử lý Output';
@@ -4306,8 +4451,8 @@ async def dashboard(request: Request):
       // Close mobile sidebar
       toggleSidebar(false);
 
-      if (tab === 'dashboard' && (!dashAllOutputPosts || dashAllOutputPosts.length === 0)) {{
-        reloadDashboardPosts();
+      if ((tab === 'output' || tab === 'raw' || tab === 'dashboard') && (!dashAllOutputPosts || dashAllOutputPosts.length === 0)) {{
+        reloadAllPostsData();
       }}
     }}
 
@@ -4632,17 +4777,17 @@ async def dashboard(request: Request):
 
     window.addEventListener('DOMContentLoaded', () => {{
       const hash = window.location.hash.replace('#', '');
-      if (['dashboard', 'scrapers', 'profiles', 'rules'].includes(hash)) {{
+      if (['dashboard', 'output', 'raw', 'scrapers', 'profiles', 'rules'].includes(hash)) {{
         switchMainTab(hash, false);
       }} else {{
         switchMainTab('dashboard', false);
       }}
-      reloadDashboardPosts();
+      reloadAllPostsData();
     }});
 
     window.addEventListener('hashchange', () => {{
       const hash = window.location.hash.replace('#', '');
-      if (['dashboard', 'scrapers', 'profiles', 'rules'].includes(hash)) {{
+      if (['dashboard', 'output', 'raw', 'scrapers', 'profiles', 'rules'].includes(hash)) {{
         switchMainTab(hash, false);
       }}
     }});
