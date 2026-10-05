@@ -277,9 +277,9 @@ def apply_filter_rule(post: dict, rule: dict) -> bool:
         return matched
 
 def apply_format_rule(post: dict, rule: dict) -> dict:
-    prefix_title = rule.get("prefix_title", "")
-    suffix_title = rule.get("suffix_title", "")
-    truncate_len = int(rule.get("truncate_content") or 0)
+    prefix_title = rule.get("prefix_title", "") or rule.get("title_prefix", "")
+    suffix_title = rule.get("suffix_title", "") or rule.get("title_suffix", "")
+    truncate_len = int(rule.get("truncate_content") or rule.get("truncate_chars") or 0)
     clean_html = rule.get("clean_html", False)
     strip_tags = rule.get("strip_tags", "")
 
@@ -331,9 +331,9 @@ def apply_extract_links_rule(post: dict, rule: dict) -> dict:
     text = f"{post.get('title', '')} {post.get('preview_title', '')} {post.get('text', '')} {post.get('description', '')} {post.get('content', '')} {post.get('url', '')} {post.get('link', '')}"
     extracted = list(post.get("gdrive_links", []))
 
-    # Google Drive
+    # Google Drive & Google Docs
     if "gdrive" in link_types:
-        d_links = re.findall(r"https?://(?:drive\.google\.com/(?:file/d/|folderview\?id=|drive/folders/|open\?id=)[a-zA-Z0-9_-]+)", text)
+        d_links = re.findall(r"https?://(?:drive\.google\.com/(?:file/d/|folderview\?id=|drive/(?:mobile/)?folders/|open\?id=)[a-zA-Z0-9_-]+|docs\.google\.com/(?:spreadsheets|document)/d/[a-zA-Z0-9_-]+)", text)
         for dl in d_links:
             if dl not in extracted:
                 extracted.append(dl)
@@ -349,6 +349,13 @@ def apply_extract_links_rule(post: dict, rule: dict) -> dict:
     if "mega" in link_types:
         m_links = re.findall(r"https?://mega\.nz/(?:file|folder)/[a-zA-Z0-9_#-]+", text)
         for ml in m_links:
+            if ml not in extracted:
+                extracted.append(ml)
+
+    # Mediafire
+    if "mediafire" in link_types or "custom" in link_types:
+        mf_links = re.findall(r"https?://(?:www\.)?mediafire\.com/(?:file|download)/[a-zA-Z0-9_.-]+", text)
+        for ml in mf_links:
             if ml not in extracted:
                 extracted.append(ml)
 

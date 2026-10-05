@@ -22,8 +22,13 @@ def generate_atom_xml(tag: str, posts: list, base_url: str = "https://rss.data1b
     ]
 
     for p in processed_posts:
-        username = p.get("username", "web_author")
-        post_iso = p["_formatted_date"].isoformat()
+        raw_dt = p.get("_formatted_date")
+        if isinstance(raw_dt, str):
+            post_iso = raw_dt
+        elif hasattr(raw_dt, "isoformat"):
+            post_iso = raw_dt.isoformat()
+        else:
+            post_iso = datetime.now(timezone.utc).isoformat()
         post_url = p.get("url", "")
         item_title = p["_formatted_title"]
         item_desc = p["_formatted_html"]

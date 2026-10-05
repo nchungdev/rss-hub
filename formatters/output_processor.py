@@ -1,6 +1,104 @@
+import os
+import json
 import html
+import logging
 from datetime import datetime, timezone
-from formatters.rule_engine import run_pipeline
+from formatters.rule_engine import run_pipeline, load_rules
+
+logger = logging.getLogger("rsshub.output_processor")
+
+CONFIG_DIR = os.getenv("CONFIG_DIR", "/app/config")
+DATA_DIR = os.getenv("DATA_DIR", "/app/data")
+
+def get_data_dir() -> str:
+    for d in [DATA_DIR, CONFIG_DIR]:
+        if os.path.exists(d):
+            return d
+    local_data = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+    os.makedirs(local_data, exist_ok=True)
+    return local_data
+
+def get_effective_applied_rules(feed_meta: dict = None) -> list:
+    feed_meta = feed_meta or {}
+    if "applied_rules" in feed_meta and feed_meta["applied_rules"] is not None:
+        return list(feed_meta["applied_rules"])
+    # If not explicitly specified on this feed, default to all enabled rules
+    all_rules = load_rules()
+    return [r_id for r_id, r in all_rules.items() if r.get("enabled", True)]
+
+def get_output_filepath(slug: str) -> str:
+    return os.path.join(get_data_dir(), f"output_{slug}.json")
+
+def get_history_filepath(slug: str) -> str:
+    return os.path.join(get_data_dir(), f"history_{slug}.json")
+
+def load_feed_output(slug: str) -> dict:
+    path = get_output_filepath(slug)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception as e:
+            logger.warning(f"Error loading output file {path}: {e}")
+    return {}
+
+def save_feed_output(slug: str, output_data: dict):
+    path = get_output_filepath(slug)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(output_data, f, ensure_ascii=False, indent=2)
+        logger.info(f"Saved task output for [{slug}] ({output_data.get('output_count', 0)} posts) to {path}")
+    except Exception as e:
+        logger.error(f"Error saving output file {path}: {e}")
+
+def get_raw_feed_posts(slug: str) -> list:
+    """Reads raw posts from history_{slug}.json (with fallbacks)."""
+    data_dir = get_data_dir()
+    path = os.path.join(data_dir, f"history_{slug}.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+                elif isinstance(data, dict):
+                    return list(data.values())
+        except Exception as e:
+            logger.warning(f"Error reading {path}: {e}")
+
+    # Fallback search for threads sanitized tags
+    if os.path.exists(data_dir):
+        for fname in os.listdir(data_dir):
+            if fname.startswith("history_") and fname.endswith(".json") and slug in fname:
+                try:
+                    with open(os.path.join(data_dir, fname), "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        posts = data if isinstance(data, list) else list(data.values())
+                        if posts:
+                            # Normalize and copy to history_{slug}.json
+                            try:
+                                with open(path, "w", encoding="utf-8") as f_out:
+                                    json.dump(posts, f_out, ensure_ascii=False, indent=2)
+                            except Exception:
+                                pass
+                            return posts
+                except Exception:
+                    pass
+    return []
+
+def serialize_post_for_storage(post: dict) -> dict:
+    """Ensures datetime and other objects in post are JSON-serializable."""
+    item = dict(post)
+    if "_formatted_date" in item:
+        dt = item["_formatted_date"]
+        if hasattr(dt, "isoformat"):
+            item["_formatted_date"] = dt.isoformat()
+        else:
+            item["_formatted_date"] = str(dt)
+    return item
 
 def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: dict = None) -> list:
     """
@@ -16,7 +114,9 @@ def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: 
     custom_cfg = feed_meta.get("custom_output") or {}
 
     # 0. Apply Output Rule Pipeline (Global Rules + Custom Rules)
-    applied_rules = feed_meta.get("applied_rules") or []
+    applied_rules = feed_meta.get("applied_rules")
+    if applied_rules is None:
+        applied_rules = get_effective_applied_rules(feed_meta)
     custom_rules = feed_meta.get("custom_rules") or []
     if "rules" in query_params:
         applied_rules = [r.strip() for r in query_params["rules"].split(",") if r.strip()]
@@ -57,7 +157,6 @@ def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: 
         include_enclosures = query_params.get("enclosures") in ("1", "true", "yes")
 
     title_template = custom_cfg.get("title_template", "").strip()
-
     category = feed_meta.get("category", "")
 
     # 2. Filter posts
@@ -88,7 +187,12 @@ def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: 
         text = (p.get("text") or "").strip()
         taken_at = p.get("taken_at", 0)
         try:
-            dt = datetime.fromtimestamp(taken_at, tz=timezone.utc)
+            if isinstance(taken_at, (int, float)) and taken_at > 0:
+                dt = datetime.fromtimestamp(taken_at, tz=timezone.utc)
+            elif isinstance(taken_at, str):
+                dt = datetime.fromisoformat(taken_at)
+            else:
+                dt = datetime.now(timezone.utc)
         except Exception:
             dt = datetime.now(timezone.utc)
         date_str = dt.strftime("%Y-%m-%d %H:%M")
@@ -114,7 +218,8 @@ def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: 
             # Smart default prefixing
             prefix = ""
             if gdrive_links or (preview_title and any(ext in preview_title.lower() for ext in ['.epub', '.pdf', '.mobi', '.azw'])):
-                prefix = "[Ebook] "
+                if not (base_raw_title and base_raw_title.startswith("[Ebook]")):
+                    prefix = "[Ebook] "
 
             if preview_title:
                 item_title = f"{prefix}{preview_title}"
@@ -132,9 +237,9 @@ def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: 
         if include_enclosures:
             if gdrive_links:
                 html_desc_parts.append('<div style="background:#e8f4fd; border:1px solid #b6d4fe; border-radius:6px; padding:10px; margin:8px 0;">')
-                html_desc_parts.append('<strong>📚 Ebook Google Drive:</strong><br/>')
+                html_desc_parts.append('<strong>📚 Ebook Google Drive / Tài liệu:</strong><br/>')
                 for glink in gdrive_links:
-                    label = preview_title or "Tải Ebook từ Google Drive"
+                    label = preview_title or "Tải Ebook / Tài liệu từ Google Drive"
                     html_desc_parts.append(f'<p style="margin:4px 0;"><a href="{html.escape(glink)}" target="_blank" style="color:#0d6efd; font-weight:bold;">📥 {html.escape(label)}</a></p>')
                 html_desc_parts.append('</div>')
             elif preview_title and preview_title != first_line:
@@ -172,3 +277,71 @@ def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: 
         processed.append(item_data)
 
     return processed
+
+def process_and_save_feed_output(slug: str, raw_posts: list = None, feed_meta: dict = None) -> dict:
+    """
+    Applies the full rule pipeline to RAW scraped posts and saves the result
+    to output_{slug}.json in DATA_DIR. Also updates feed metrics in feeds.json.
+    """
+    from scrapers.feed_manager import load_feeds, save_feeds
+    feeds = load_feeds()
+    if feed_meta is None:
+        feed_meta = feeds.get(slug, {})
+
+    if raw_posts is None:
+        raw_posts = get_raw_feed_posts(slug)
+
+    applied_rules = get_effective_applied_rules(feed_meta)
+    
+    # Run through pipeline & formatters
+    processed = process_posts_for_output(raw_posts, feed_meta=feed_meta)
+    
+    # Serialize for JSON storage
+    serializable_posts = [serialize_post_for_storage(p) for p in processed]
+    
+    now_iso = datetime.now(timezone.utc).isoformat()
+    output_data = {
+        "slug": slug,
+        "title": feed_meta.get("title", slug),
+        "updated_at": now_iso,
+        "raw_count": len(raw_posts),
+        "output_count": len(serializable_posts),
+        "filtered_count": max(0, len(raw_posts) - len(serializable_posts)),
+        "rules_applied": applied_rules,
+        "posts": serializable_posts
+    }
+    
+    save_feed_output(slug, output_data)
+    
+    # Update feed meta in feeds.json
+    if slug in feeds:
+        feeds[slug]["last_processed_at"] = datetime.now(timezone.utc).timestamp()
+        feeds[slug]["raw_post_count"] = len(raw_posts)
+        feeds[slug]["output_post_count"] = len(serializable_posts)
+        save_feeds(feeds)
+        
+    return output_data
+
+def reprocess_all_feeds() -> list:
+    """
+    Re-processes all feeds from their RAW data without re-scraping the web.
+    Called when rules are created, updated, or deleted.
+    """
+    from scrapers.feed_manager import load_feeds
+    feeds = load_feeds()
+    results = []
+    for slug, meta in feeds.items():
+        try:
+            res = process_and_save_feed_output(slug, feed_meta=meta)
+            results.append({
+                "slug": slug,
+                "title": meta.get("title", slug),
+                "raw_count": res.get("raw_count", 0),
+                "output_count": res.get("output_count", 0),
+                "filtered_count": res.get("filtered_count", 0),
+                "rules_applied": res.get("rules_applied", [])
+            })
+        except Exception as e:
+            logger.error(f"Error reprocessing feed {slug}: {e}")
+            results.append({"slug": slug, "error": str(e)})
+    return results

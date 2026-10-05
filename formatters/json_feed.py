@@ -14,8 +14,13 @@ def generate_json_feed(tag: str, posts: list, base_url: str = "https://rss.data1
     items = []
     for p in processed_posts:
         username = p.get("username", "web_author")
-        text = (p.get("text") or "").strip()
-        iso_date = p["_formatted_date"].isoformat()
+        raw_dt = p.get("_formatted_date")
+        if isinstance(raw_dt, str):
+            iso_date = raw_dt
+        elif hasattr(raw_dt, "isoformat"):
+            iso_date = raw_dt.isoformat()
+        else:
+            iso_date = datetime.now(timezone.utc).isoformat()
         post_url = p.get("url", "")
         images = p["_formatted_images"]
         gdrive_links = p.get("gdrive_links", [])

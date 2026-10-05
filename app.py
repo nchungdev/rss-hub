@@ -37,6 +37,14 @@ from formatters.rule_engine import (
     get_rules_summary,
     run_pipeline
 )
+from formatters.output_processor import (
+    process_posts_for_output,
+    load_feed_output,
+    save_feed_output,
+    process_and_save_feed_output,
+    reprocess_all_feeds,
+    get_raw_feed_posts
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("rsshub.wrapper")
@@ -76,8 +84,11 @@ async def background_scheduler():
                 last_scraped = float(meta.get("last_scraped_at") or 0)
                 if now - last_scraped >= feed_interval * 60:
                     logger.info(f"Triggering scheduled scrape for feed [{slug}] (interval: {feed_interval}m)...")
-                    await asyncio.to_thread(get_feed_posts, slug, True)
+                    posts = await asyncio.to_thread(get_feed_posts, slug, True)
+                    out_res = await asyncio.to_thread(process_and_save_feed_output, slug, posts, meta)
                     meta["last_scraped_at"] = now
+                    meta["raw_post_count"] = len(posts)
+                    meta["output_post_count"] = out_res.get("output_count", len(posts))
                     feeds[slug] = meta
                     save_feeds(feeds)
         except Exception as e:
@@ -87,6 +98,8 @@ async def background_scheduler():
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(background_scheduler())
+    # On startup, ensure all feeds have generated Task Output files from existing RAW data
+    asyncio.create_task(asyncio.to_thread(reprocess_all_feeds))
 
 @app.get("/health")
 def health_check():
@@ -191,12 +204,16 @@ def api_get_rule_detail(rule_id: str):
 async def api_create_or_update_rule(request: Request):
     data = await request.json()
     rule_id = save_rule(data)
+    # Automatically reprocess all feeds with updated rules
+    asyncio.create_task(asyncio.to_thread(reprocess_all_feeds))
     return {"status": "ok", "id": rule_id}
 
 @app.delete("/api/rules/{rule_id}")
 def api_delete_rule(rule_id: str):
     success = delete_rule(rule_id)
     if success:
+        # Automatically reprocess all feeds after rule deletion
+        asyncio.create_task(asyncio.to_thread(reprocess_all_feeds))
         return {"status": "ok", "id": rule_id}
     raise HTTPException(status_code=404, detail="Không tìm thấy rule này")
 
@@ -257,7 +274,7 @@ async def api_create_or_update_feed(request: Request):
     if not created_at:
         created_at = datetime.now(timezone.utc).isoformat()
 
-    # If slug was renamed, delete old key and move history cache
+    # If slug was renamed, delete old key and move history cache & output files
     if original_slug and original_slug != slug:
         if original_slug in feeds:
             del feeds[original_slug]
@@ -266,6 +283,13 @@ async def api_create_or_update_feed(request: Request):
             if os.path.exists(old_cache):
                 try:
                     os.rename(old_cache, new_cache)
+                except Exception:
+                    pass
+            old_out = os.path.join(DATA_DIR, f"output_{original_slug}.json")
+            new_out = os.path.join(DATA_DIR, f"output_{slug}.json")
+            if os.path.exists(old_out):
+                try:
+                    os.rename(old_out, new_out)
                 except Exception:
                     pass
 
@@ -291,8 +315,15 @@ async def api_create_or_update_feed(request: Request):
     }
     save_feeds(feeds)
     
-    # Trigger initial scrape in background
-    asyncio.create_task(asyncio.to_thread(get_feed_posts, slug, True))
+    # Trigger initial scrape and auto-process output in background
+    async def initial_scrape_and_process():
+        try:
+            p = await asyncio.to_thread(get_feed_posts, slug, True)
+            await asyncio.to_thread(process_and_save_feed_output, slug, p, feeds.get(slug, {}))
+        except Exception as e:
+            logger.warning(f"Initial scrape/process failed for {slug}: {e}")
+
+    asyncio.create_task(initial_scrape_and_process())
     return {"status": "ok", "slug": slug}
 
 @app.get("/api/feeds/{slug}")
@@ -333,6 +364,12 @@ def api_delete_feed(slug: str):
                 os.remove(cache_file)
             except Exception:
                 pass
+        out_file = os.path.join(DATA_DIR, f"output_{clean_slug}.json")
+        if os.path.exists(out_file):
+            try:
+                os.remove(out_file)
+            except Exception:
+                pass
         return {"status": "ok", "slug": clean_slug}
     raise HTTPException(status_code=404, detail="Kênh feed không tồn tại")
 
@@ -360,13 +397,78 @@ async def refresh_feed(tag: str):
     now = datetime.now(timezone.utc).timestamp()
     posts = await asyncio.to_thread(get_feed_posts, clean_tag, True)
     feeds = load_feeds()
+    meta = feeds.get(clean_tag, {})
+    out_res = await asyncio.to_thread(process_and_save_feed_output, clean_tag, posts, meta)
     if clean_tag in feeds:
         feeds[clean_tag]["last_scraped_at"] = now
         feeds[clean_tag]["last_status"] = "success" if posts else "empty"
         feeds[clean_tag]["last_post_count"] = len(posts)
         feeds[clean_tag]["total_posts"] = len(posts)
+        feeds[clean_tag]["raw_post_count"] = len(posts)
+        feeds[clean_tag]["output_post_count"] = out_res.get("output_count", len(posts))
         save_feeds(feeds)
-    return {"status": "ok", "tag": clean_tag, "count": len(posts)}
+    return {
+        "status": "ok",
+        "tag": clean_tag,
+        "count": len(posts),
+        "raw_count": len(posts),
+        "output_count": out_res.get("output_count", len(posts)),
+        "filtered_count": out_res.get("filtered_count", 0)
+    }
+
+@app.post("/api/feeds/{slug}/reprocess")
+async def api_reprocess_feed(slug: str):
+    clean_slug = sanitize_slug(slug.lstrip("#"))
+    feeds = load_feeds()
+    if clean_slug not in feeds:
+        raise HTTPException(status_code=404, detail="Kênh feed không tồn tại")
+    res = await asyncio.to_thread(process_and_save_feed_output, clean_slug)
+    return {
+        "status": "ok",
+        "slug": clean_slug,
+        "raw_count": res.get("raw_count", 0),
+        "output_count": res.get("output_count", 0),
+        "filtered_count": res.get("filtered_count", 0),
+        "updated_at": res.get("updated_at")
+    }
+
+@app.post("/api/reprocess-all")
+async def api_reprocess_all():
+    results = await asyncio.to_thread(reprocess_all_feeds)
+    return {"status": "ok", "feeds": results}
+
+@app.get("/api/feeds/{slug}/output")
+async def api_get_feed_output(slug: str):
+    clean_slug = sanitize_slug(slug.lstrip("#"))
+    feeds = load_feeds()
+    if clean_slug not in feeds:
+        raise HTTPException(status_code=404, detail="Kênh feed không tồn tại")
+    meta = feeds[clean_slug]
+    raw_posts = await asyncio.to_thread(get_raw_feed_posts, clean_slug)
+    if not raw_posts:
+        raw_posts = await asyncio.to_thread(get_feed_posts, clean_slug, False)
+    if not isinstance(raw_posts, list):
+        raw_posts = list(raw_posts.values()) if isinstance(raw_posts, dict) else []
+
+    output_data = await asyncio.to_thread(load_feed_output, clean_slug)
+    if not output_data or not output_data.get("posts"):
+        output_data = await asyncio.to_thread(process_and_save_feed_output, clean_slug, raw_posts, meta)
+
+    return {
+        "status": "ok",
+        "slug": clean_slug,
+        "title": meta.get("title", clean_slug),
+        "category": meta.get("category", "Chung"),
+        "target": meta.get("target", clean_slug),
+        "type": meta.get("type", "web"),
+        "raw_count": len(raw_posts),
+        "output_count": output_data.get("output_count", len(output_data.get("posts", []))),
+        "filtered_count": max(0, len(raw_posts) - len(output_data.get("posts", []))),
+        "rules_applied": output_data.get("rules_applied", []),
+        "updated_at": output_data.get("updated_at"),
+        "raw_posts": raw_posts,
+        "output_posts": output_data.get("posts", [])
+    }
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
@@ -432,11 +534,19 @@ async def dashboard(request: Request):
             custom_badges.append('<span class="badge" style="padding: 2px 6px; font-size: 0.65rem; opacity: 0.8;" title="Mẫu tiêu đề tùy chỉnh">🏷️ Template</span>')
         custom_badges_html = " ".join(custom_badges)
 
-        # Recent items preview (sleek single row per article)
+        out_data = await asyncio.to_thread(load_feed_output, slug)
+        if not out_data or not out_data.get("posts"):
+            out_data = await asyncio.to_thread(process_and_save_feed_output, slug, posts, meta)
+        out_posts = out_data.get("posts", [])
+        out_count = len(out_posts)
+        filtered_count = max(0, count - out_count)
+
+        # Recent items preview (sleek single row per article from task output)
         preview_items_html = ""
-        for p in posts[:3]:
-            user = p.get("username", "web")
-            first_line = p.get("preview_title") or (p.get("text", "").split("\n")[0][:110] if p.get("text") else "Bài viết không có tiêu đề")
+        preview_src = out_posts[:3] if out_posts else posts[:3]
+        for p in preview_src:
+            user = p.get("_formatted_creator") or p.get("username", "web")
+            first_line = p.get("_formatted_title") or p.get("preview_title") or (p.get("text", "").split("\n")[0][:110] if p.get("text") else "Bài viết không có tiêu đề")
             gdrive = p.get("gdrive_links", [])
             badge = '<span class="badge cyan" style="padding: 2px 7px; font-size: 0.65rem;"><span class="dot"></span> Ebook Drive</span>' if gdrive else ""
             item_url = p.get("url", "#")
@@ -473,7 +583,7 @@ async def dashboard(request: Request):
                         <div style="display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 0.73rem; color: var(--text-dim); flex-wrap: wrap;">
                             <span style="font-family: var(--mono); color: var(--text-muted); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{meta.get('target', slug)}">🎯 {meta.get('target', slug)}</span>
                             <span>•</span>
-                            <span style="color: #34d399; font-weight: 600;">{count} bài viết</span>
+                            <span style="color: #34d399; font-weight: 600;">{out_count} output / {count} raw bài</span>
                             {f'<span>•</span><span style="max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim);" title="{meta.get("description", "")}">{meta.get("description", "")}</span>' if meta.get("description") else ''}
                         </div>
                     </div>
@@ -499,11 +609,15 @@ async def dashboard(request: Request):
 
                     <div style="width: 1px; height: 18px; background: var(--card-border); margin: 0 2px;"></div>
 
-                    <!-- Toggle Preview -->
-                    <button class="btn" onclick="toggleFeedPreview('{slug}')" id="btnPreview_{slug}" title="Xem trước bài viết vừa cào" style="height: 30px; padding: 0 9px; font-size: 0.74rem;">
+                    <!-- Open Output Preview & Compare Modal -->
+                    <button class="btn" onclick="openCompareModal('{slug}')" id="btnPreview_{slug}" title="Xem và so sánh Task Output sau Rule & RAW Data" style="height: 30px; padding: 0 9px; font-size: 0.74rem; color: #38bdf8; border-color: rgba(56,189,248,0.3);">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                        <span>Bài viết</span>
-                        <svg id="chevronPreview_{slug}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px; transition: transform 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>
+                        <span>Xem Output</span>
+                    </button>
+
+                    <!-- Reprocess Rules -->
+                    <button class="btn" onclick="reprocessFeed('{slug}', this)" title="Chạy lại bộ Rules trên RAW Data đã cào" style="height: 30px; padding: 0 8px; font-size: 0.74rem; color: #a855f7; border-color: rgba(168,85,247,0.3);">
+                        <span>⚡ Rule</span>
                     </button>
 
                     <!-- Edit Scraper Config -->
@@ -529,7 +643,7 @@ async def dashboard(request: Request):
             <div id="drawerPreview_{slug}" style="display: none; margin-top: 6px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.06);">
                 <div style="font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                    <span>Bài viết vừa cào gần đây</span>
+                    <span>Bài viết output sau khi qua bộ rule</span>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr; gap: 6px;">
                     {preview_items_html if preview_items_html else '<div style="color:var(--text-dim); font-size:0.75rem; font-style:italic; padding:4px 0;">Chưa có dữ liệu bài viết (bấm nút Cào để tải).</div>'}
@@ -563,8 +677,14 @@ async def dashboard(request: Request):
             posts_for_feed = list(posts_for_feed.values()) if isinstance(posts_for_feed, dict) else []
         p_count = len(posts_for_feed)
 
+        out_data = await asyncio.to_thread(load_feed_output, slug)
+        if not out_data or not out_data.get("posts"):
+            out_data = await asyncio.to_thread(process_and_save_feed_output, slug, posts_for_feed, meta)
+        out_count = len(out_data.get("posts", [])) if out_data else p_count
+        filtered_count = max(0, p_count - out_count)
+
         # Status badge
-        if last_scraped == 0:
+        if last_scraped == 0 and p_count == 0:
             status_badge = '<span class="badge" style="background:rgba(255,255,255,0.06); color:var(--text-muted);"><span class="dot"></span> Chưa cào</span>'
             time_ago = "Chưa cào"
             next_due = "Sẵn sàng"
@@ -584,7 +704,8 @@ async def dashboard(request: Request):
                 next_due = f"Còn ~{due_in // 60}m"
 
             if p_count > 0:
-                status_badge = f'<span class="badge green" style="font-weight:600;"><span class="dot" style="background:#10b981;"></span> Thành công ({p_count} bài)</span>'
+                filter_sub = f' <span style="color:#fbbf24; font-size:0.65rem;" title="Đã lọc loại bỏ {filtered_count} bài rác/spam qua Rules">(Lọc -{filtered_count})</span>' if filtered_count > 0 else ""
+                status_badge = f'<span class="badge green" style="font-weight:600;"><span class="dot" style="background:#10b981;"></span> Output: {out_count}/{p_count} bài{filter_sub}</span>'
             else:
                 status_badge = '<span class="badge yellow" style="font-weight:600;"><span class="dot" style="background:#f59e0b;"></span> Trống (0 bài)</span>'
 
@@ -657,8 +778,12 @@ async def dashboard(request: Request):
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
                         <span>Cào</span>
                     </button>
-                    <button class="btn" onclick="viewFeedInScrapers('{slug}')" id="btnDashPreview_{slug}" title="Xem trước bài viết vừa cào" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">
-                        <span>Xem</span>
+                    <button class="btn" onclick="openCompareModal('{slug}')" id="btnDashPreview_{slug}" title="Xem và so sánh Task Output sau Rule vs RAW Data gốc" style="height: 28px; padding: 0 8px; font-size: 0.72rem; color: #38bdf8; border-color: rgba(56, 189, 248, 0.3);">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        <span>Xem Output</span>
+                    </button>
+                    <button class="btn" onclick="reprocessFeed('{slug}', this)" title="Chạy lại Rules trên RAW data không cần cào lại web" style="height: 28px; padding: 0 8px; font-size: 0.72rem; color: #a855f7; border-color: rgba(168, 85, 247, 0.3);">
+                        <span>⚡ Rule</span>
                     </button>
                     <button class="btn" onclick="editFeedModal('{slug}')" title="Cấu hình scraper này" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">
                         <span>Cấu hình</span>
@@ -1724,6 +1849,9 @@ async def dashboard(request: Request):
       <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
         <!-- Dashboard Actions -->
         <div id="topbarActions_dashboard" style="display: flex; align-items: center; gap: 8px;">
+          <button class="btn" onclick="reprocessAllFeeds(this)" title="Chạy lại toàn bộ Rules trên dữ liệu RAW của tất cả scraper" style="height: 32px; font-size: 0.76rem; color: #a855f7; border-color: rgba(168, 85, 247, 0.35);">
+            <span>⚡ Chạy lại tất cả Rule</span>
+          </button>
           <button class="btn" onclick="openAllIntervalsModal()" title="Xem lịch cào riêng của các Scraper" style="height: 32px; font-size: 0.76rem;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             <span>Lịch cào</span>
@@ -1756,6 +1884,9 @@ async def dashboard(request: Request):
 
         <!-- Rules Actions -->
         <div id="topbarActions_rules" style="display: none; align-items: center; gap: 8px;">
+          <button class="btn" onclick="reprocessAllFeeds(this)" style="height: 32px; font-size: 0.76rem; color: #a855f7; border-color: rgba(168, 85, 247, 0.35);" title="Chạy lại Rules trên RAW data của tất cả scraper">
+            <span>⚡ Re-process toàn bộ Feed</span>
+          </button>
           <button class="btn primary" onclick="openAddRuleModal()" style="height: 32px; font-size: 0.76rem;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             <span>+ Thêm Rule mới</span>
@@ -2522,6 +2653,80 @@ async def dashboard(request: Request):
     </div>
   </div>
 
+  <!-- MODAL: COMPARE RAW VS TASK OUTPUT -->
+  <div id="modalCompareOutput" class="modal-overlay" onclick="handleModalClick(event, 'modalCompareOutput')">
+    <div class="modal-card" style="width: min(920px, 96vw); max-height: 90vh; display: flex; flex-direction: column;">
+      <!-- Modal Head -->
+      <div class="modal-head" style="padding-bottom: 12px; border-bottom: 1px solid var(--card-border);">
+        <div>
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <h2 class="modal-title" id="cmpModalTitle" style="font-size: 1.1rem;">So sánh Task Output &amp; RAW Data</h2>
+            <span id="cmpModalCatBadge" class="badge gray">Chung</span>
+            <span id="cmpModalSlug" style="font-family: var(--mono); font-size: 0.75rem; color: var(--text-dim);">/slug</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; margin-top: 6px; font-size: 0.76rem; color: var(--text-dim); flex-wrap: wrap;">
+            <span id="cmpStatsBar">RAW: <strong>0</strong> ➔ Output: <strong style="color:#10b981;">0</strong> bài</span>
+            <span>•</span>
+            <span id="cmpRulesAppliedSummary" style="color: #38bdf8;">0 rules áp dụng</span>
+            <span>•</span>
+            <span id="cmpUpdatedAt">Vừa xong</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('modalCompareOutput')">✕</button>
+      </div>
+
+      <!-- Sub Navigation Tabs -->
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.06); gap: 10px; flex-wrap: wrap;">
+        <div style="display: flex; gap: 6px;">
+          <button type="button" class="pill active" id="tabBtnOutput" onclick="switchCompareTab('output')">
+            <span>🎯 Task Output sau Rule</span>
+            <span class="pill-count" id="cmpOutputBadge">0</span>
+          </button>
+          <button type="button" class="pill" id="tabBtnRaw" onclick="switchCompareTab('raw')">
+            <span>📄 RAW Data gốc</span>
+            <span class="pill-count" id="cmpRawBadge">0</span>
+          </button>
+        </div>
+        <div id="cmpActiveRulesPills" style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center;"></div>
+      </div>
+
+      <!-- Modal Body -->
+      <div style="flex: 1; overflow-y: auto; padding: 14px 0; min-height: 280px;" id="cmpModalBody">
+        <!-- Tab 1: Task Output -->
+        <div id="cmpTabOutputPanel">
+          <div id="cmpOutputList" style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="text-align:center; padding:30px; color:var(--text-dim);">Đang tải dữ liệu...</div>
+          </div>
+        </div>
+
+        <!-- Tab 2: RAW Data -->
+        <div id="cmpTabRawPanel" style="display: none;">
+          <div id="cmpRawList" style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="text-align:center; padding:30px; color:var(--text-dim);">Đang tải dữ liệu...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="modal-foot" style="padding-top: 12px; border-top: 1px solid var(--card-border); display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button type="button" class="btn primary" id="btnCmpReprocess" onclick="reprocessModalFeed()" style="height: 32px; padding: 0 12px; font-size: 0.75rem;" title="Chạy lại bộ Rules trên RAW Data không cần cào lại">
+            <span>⚡ Chạy lại Rule</span>
+          </button>
+          <button type="button" class="btn" id="btnCmpScrape" onclick="scrapeModalFeed()" style="height: 32px; padding: 0 12px; font-size: 0.75rem;" title="Cào mới dữ liệu trực tiếp từ Website">
+            <span>🌐 Cào mới từ Web</span>
+          </button>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <a id="cmpLinkXml" href="#" target="_blank" class="format-btn xml" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">XML</a>
+          <a id="cmpLinkJson" href="#" target="_blank" class="format-btn json" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">JSON</a>
+          <a id="cmpLinkAtom" href="#" target="_blank" class="format-btn atom" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">ATOM</a>
+          <button type="button" class="btn" onclick="closeModal('modalCompareOutput')" style="height: 32px; padding: 0 14px;">Đóng</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification -->
   <div id="toast" class="toast">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px; color: #34d399;"><polyline points="20 6 9 17 4 12"/></svg>
@@ -2564,7 +2769,10 @@ async def dashboard(request: Request):
       fetch('/api/refresh/' + slug)
         .then(r => r.json())
         .then(d => {{
-          showToast('Đã cào mới thành công: ' + d.count + ' bài viết');
+          const msg = (d.output_count !== undefined)
+            ? 'Đã cào mới: ' + d.raw_count + ' ➔ ' + d.output_count + ' bài'
+            : 'Đã cào mới thành công: ' + d.count + ' bài viết';
+          showToast(msg);
           setTimeout(() => location.reload(), 1000);
         }})
         .catch(e => {{
@@ -2601,6 +2809,333 @@ async def dashboard(request: Request):
           setTimeout(() => location.reload(), 800);
         }})
         .catch(e => showToast('Lỗi khi xóa: ' + e, true));
+    }}
+
+    // MODAL COMPARE & TASK OUTPUT JAVASCRIPT HANDLERS
+    let currentCmpSlug = null;
+
+    function openCompareModal(slug) {{
+      currentCmpSlug = slug;
+      const modal = document.getElementById('modalCompareOutput');
+      if (!modal) return;
+
+      const titleEl = document.getElementById('cmpModalTitle');
+      if (titleEl) titleEl.innerText = 'So sánh: ' + slug;
+      const slugEl = document.getElementById('cmpModalSlug');
+      if (slugEl) slugEl.innerText = '/' + slug;
+      const catEl = document.getElementById('cmpModalCatBadge');
+      if (catEl) catEl.innerText = 'Đang tải...';
+
+      const lXml = document.getElementById('cmpLinkXml');
+      if (lXml) lXml.href = '/' + slug + '.xml';
+      const lJson = document.getElementById('cmpLinkJson');
+      if (lJson) lJson.href = '/' + slug + '.json';
+      const lAtom = document.getElementById('cmpLinkAtom');
+      if (lAtom) lAtom.href = '/' + slug + '.atom';
+
+      const outList = document.getElementById('cmpOutputList');
+      if (outList) outList.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-dim);"><svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-bottom: 8px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><br>Đang tải Task Output sau Rule...</div>';
+      const rawList = document.getElementById('cmpRawList');
+      if (rawList) rawList.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-dim);"><svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-bottom: 8px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><br>Đang tải RAW Data gốc...</div>';
+
+      switchCompareTab('output');
+      openModal('modalCompareOutput');
+      loadCompareModalData(slug);
+    }}
+
+    function switchCompareTab(tab) {{
+      const tabBtnOut = document.getElementById('tabBtnOutput');
+      const tabBtnRaw = document.getElementById('tabBtnRaw');
+      const panelOut = document.getElementById('cmpTabOutputPanel');
+      const panelRaw = document.getElementById('cmpTabRawPanel');
+
+      if (tab === 'output') {{
+        if (tabBtnOut) tabBtnOut.classList.add('active');
+        if (tabBtnRaw) tabBtnRaw.classList.remove('active');
+        if (panelOut) panelOut.style.display = 'block';
+        if (panelRaw) panelRaw.style.display = 'none';
+      }} else {{
+        if (tabBtnOut) tabBtnOut.classList.remove('active');
+        if (tabBtnRaw) tabBtnRaw.classList.add('active');
+        if (panelOut) panelOut.style.display = 'none';
+        if (panelRaw) panelRaw.style.display = 'block';
+      }}
+    }}
+
+    function loadCompareModalData(slug) {{
+      fetch('/api/feeds/' + slug + '/output')
+        .then(r => {{
+          if (!r.ok) throw new Error('Không thể tải dữ liệu output cho ' + slug);
+          return r.json();
+        }})
+        .then(d => {{
+          const titleEl = document.getElementById('cmpModalTitle');
+          if (titleEl) titleEl.innerText = 'So sánh: ' + (d.title || d.slug);
+          const slugEl = document.getElementById('cmpModalSlug');
+          if (slugEl) slugEl.innerText = '/' + d.slug;
+          const catEl = document.getElementById('cmpModalCatBadge');
+          if (catEl) catEl.innerText = d.category || 'Chung';
+
+          const outCount = d.output_count || 0;
+          const rawCount = d.raw_count || 0;
+          const filtCount = d.filtered_count || 0;
+
+          const statsBar = document.getElementById('cmpStatsBar');
+          if (statsBar) {{
+            statsBar.innerHTML = 'RAW: <strong style="color:var(--text);">' + rawCount + '</strong> ➔ Output: <strong style="color:#10b981;">' + outCount + '</strong> bài' + (filtCount > 0 ? ' <span style="color:#f87171; font-weight:600;">(Lọc -' + filtCount + ')</span>' : '');
+          }}
+
+          const rulesEl = document.getElementById('cmpRulesAppliedSummary');
+          const ruleList = d.rules_applied || [];
+          if (rulesEl) {{
+            rulesEl.innerText = ruleList.length + ' rules áp dụng';
+          }}
+
+          const updatedEl = document.getElementById('cmpUpdatedAt');
+          if (updatedEl) {{
+            if (d.updated_at) {{
+              try {{
+                const dt = new Date(d.updated_at);
+                updatedEl.innerText = 'Xử lý: ' + dt.toLocaleTimeString() + ' ' + dt.toLocaleDateString();
+              }} catch(e) {{
+                updatedEl.innerText = 'Xử lý: ' + d.updated_at;
+              }}
+            }} else {{
+              updatedEl.innerText = 'Vừa xử lý';
+            }}
+          }}
+
+          const badgeOut = document.getElementById('cmpOutputBadge');
+          if (badgeOut) badgeOut.innerText = outCount;
+          const badgeRaw = document.getElementById('cmpRawBadge');
+          if (badgeRaw) badgeRaw.innerText = rawCount;
+
+          const pillsCont = document.getElementById('cmpActiveRulesPills');
+          if (pillsCont) {{
+            if (!ruleList || ruleList.length === 0) {{
+              pillsCont.innerHTML = '<span style="font-size:0.68rem; color:var(--text-dim);">(Không áp dụng rule nào)</span>';
+            }} else {{
+              pillsCont.innerHTML = ruleList.map(rId => '<span style="font-size: 0.65rem; padding: 2px 7px; background: rgba(56,189,248,0.12); color: #38bdf8; border: 1px solid rgba(56,189,248,0.25); border-radius: 4px; font-family: var(--mono);">' + rId + '</span>').join('');
+            }}
+          }}
+
+          const outList = document.getElementById('cmpOutputList');
+          if (outList) {{
+            const posts = d.output_posts || [];
+            if (posts.length === 0) {{
+              outList.innerHTML = '<div style="text-align:center; padding:36px; color:var(--text-dim); background:rgba(255,255,255,0.02); border-radius:8px; border:1px dashed var(--card-border);">Không có bài viết nào trong Task Output sau khi chạy Rule.</div>';
+            }} else {{
+              outList.innerHTML = posts.map((p, idx) => renderOutputPostItem(p, idx)).join('');
+            }}
+          }}
+
+          const rawList = document.getElementById('cmpRawList');
+          if (rawList) {{
+            const posts = d.raw_posts || [];
+            if (posts.length === 0) {{
+              rawList.innerHTML = '<div style="text-align:center; padding:36px; color:var(--text-dim); background:rgba(255,255,255,0.02); border-radius:8px; border:1px dashed var(--card-border);">Không có dữ liệu RAW. Hãy bấm "Cào mới từ Web" để lấy bài viết.</div>';
+            }} else {{
+              rawList.innerHTML = posts.map((p, idx) => renderRawPostItem(p, idx)).join('');
+            }}
+          }}
+        }})
+        .catch(err => {{
+          showToast('Lỗi tải dữ liệu output: ' + err, true);
+          const outList = document.getElementById('cmpOutputList');
+          if (outList) outList.innerHTML = '<div style="text-align:center; padding:20px; color:#f87171;">' + err + '</div>';
+        }});
+    }}
+
+    function renderOutputPostItem(item, idx) {{
+      const title = item._formatted_title || item.preview_title || item.title || '(Không có tiêu đề)';
+      const link = item.url || item.link || '#';
+      const dateStr = item._formatted_date || item.pubDate || item.published || (item.taken_at ? new Date(item.taken_at * 1000).toLocaleString() : '') || item.created_at || '';
+      const content = item._formatted_html || item.content || item.description || item.text || item.summary || '';
+      const jsonStr = encodeURIComponent(JSON.stringify(item, null, 2));
+
+      // Extract Drive / Ebook / Enclosure info if present
+      let ebookBox = '';
+      const driveList = item.gdrive_links || item._extracted_links || [];
+      if (item.enclosure && item.enclosure.url) {{
+        ebookBox = `
+          <div style="margin-top: 8px; padding: 8px 10px; background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 6px; font-size: 0.73rem; color: #10b981; font-weight: 500;">
+              <span>📥 Enclosure / Ebook:</span>
+              <a href="${{item.enclosure.url}}" target="_blank" rel="noopener" style="color: #34d399; text-decoration: underline; word-break: break-all;">${{item.enclosure.url}}</a>
+            </div>
+            <a href="${{item.enclosure.url}}" target="_blank" class="btn" style="height: 24px; padding: 0 8px; font-size: 0.68rem; background: rgba(16,185,129,0.18); color: #34d399; border-color: rgba(16,185,129,0.4);">Mở Link</a>
+          </div>
+        `;
+      }} else if (driveList.length > 0) {{
+        const linksHtml = driveList.map(l => `<a href="${{l}}" target="_blank" rel="noopener" style="color: #10b981; text-decoration: underline; margin-right: 8px; font-size: 0.72rem; word-break: break-all;">📚 ${{l}}</a>`).join('');
+        ebookBox = `
+          <div style="margin-top: 8px; padding: 8px 10px; background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: 6px; font-size: 0.73rem;">
+            <div style="font-weight: 600; color: #10b981; margin-bottom: 4px;">📥 Kho Ebook / Tài liệu bóc tách:</div>
+            <div>${{linksHtml}}</div>
+          </div>
+        `;
+      }}
+
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = content;
+      const cleanSnippet = tempDiv.textContent || tempDiv.innerText || '';
+      const truncatedSnippet = cleanSnippet.length > 200 ? cleanSnippet.slice(0, 200) + '...' : cleanSnippet;
+
+      return `
+        <div style="padding: 12px; background: rgba(255,255,255,0.025); border: 1px solid var(--card-border); border-radius: 8px; transition: border-color 0.15s;">
+          <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
+            <div style="flex: 1; min-width: 0;">
+              <a href="${{link}}" target="_blank" rel="noopener" style="font-size: 0.85rem; font-weight: 600; color: #f8fafc; text-decoration: none; line-height: 1.4; display: inline-block;">
+                ${{title}}
+              </a>
+              <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 0.7rem; color: var(--text-dim); flex-wrap: wrap;">
+                <span>#${{idx + 1}}</span>
+                ${{dateStr ? '<span>•</span><span>' + dateStr + '</span>' : ''}}
+                ${{item._applied_rules && item._applied_rules.length ? '<span>•</span><span style="color:#a855f7;">Rule: ' + item._applied_rules.join(', ') + '</span>' : ''}}
+              </div>
+            </div>
+            <button type="button" class="btn" onclick="toggleItemJson('out_json_${{idx}}')" style="height: 24px; padding: 0 8px; font-size: 0.68rem; color: var(--text-dim);" title="Xem cấu trúc JSON của bài viết">
+              JSON
+            </button>
+          </div>
+          ${{truncatedSnippet ? '<div style="margin-top: 8px; font-size: 0.76rem; color: var(--text-muted); line-height: 1.45; word-break: break-word;">' + truncatedSnippet + '</div>' : ''}}
+          ${{ebookBox}}
+          <pre id="out_json_${{idx}}" style="display: none; margin-top: 10px; padding: 10px; background: #0b0f19; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; font-family: var(--mono); font-size: 0.68rem; color: #94a3b8; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all;">${{decodeURIComponent(jsonStr)}}</pre>
+        </div>
+      `;
+    }}
+
+    function renderRawPostItem(item, idx) {{
+      const title = item.preview_title || item._formatted_title || item.title || (item.text ? item.text.slice(0, 80) : '') || '(Không có tiêu đề gốc)';
+      const link = item.url || item.link || '#';
+      const dateStr = item._formatted_date || item.pubDate || item.published || (item.taken_at ? new Date(item.taken_at * 1000).toLocaleString() : '') || item.created_at || '';
+      const content = item.text || item.description || item.content || item.summary || item._formatted_html || '';
+      const jsonStr = encodeURIComponent(JSON.stringify(item, null, 2));
+
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = content;
+      const cleanSnippet = tempDiv.textContent || tempDiv.innerText || '';
+      const truncatedSnippet = cleanSnippet.length > 200 ? cleanSnippet.slice(0, 200) + '...' : cleanSnippet;
+
+      return `
+        <div style="padding: 12px; background: rgba(255,255,255,0.015); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px;">
+          <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
+            <div style="flex: 1; min-width: 0;">
+              <a href="${{link}}" target="_blank" rel="noopener" style="font-size: 0.84rem; font-weight: 600; color: #cbd5e1; text-decoration: none; line-height: 1.4; display: inline-block;">
+                ${{title}}
+              </a>
+              <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 0.7rem; color: var(--text-dim); flex-wrap: wrap;">
+                <span>#${{idx + 1}} (RAW)</span>
+                ${{dateStr ? '<span>•</span><span>' + dateStr + '</span>' : ''}}
+                <a href="${{link}}" target="_blank" rel="noopener" style="color: var(--text-dim); text-decoration: underline; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${{link}}</a>
+              </div>
+            </div>
+            <button type="button" class="btn" onclick="toggleItemJson('raw_json_${{idx}}')" style="height: 24px; padding: 0 8px; font-size: 0.68rem; color: var(--text-dim);" title="Xem cấu trúc JSON gốc">
+              JSON
+            </button>
+          </div>
+          ${{truncatedSnippet ? '<div style="margin-top: 8px; font-size: 0.75rem; color: var(--text-dim); line-height: 1.45; word-break: break-word;">' + truncatedSnippet + '</div>' : ''}}
+          <pre id="raw_json_${{idx}}" style="display: none; margin-top: 10px; padding: 10px; background: #0b0f19; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; font-family: var(--mono); font-size: 0.68rem; color: #94a3b8; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all;">${{decodeURIComponent(jsonStr)}}</pre>
+        </div>
+      `;
+    }}
+
+    function toggleItemJson(id) {{
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.style.display = (el.style.display === 'none' || el.style.display === '') ? 'block' : 'none';
+    }}
+
+    function reprocessFeed(slug, btn) {{
+      if (btn) {{
+        btn.dataset.origHtml = btn.innerHTML;
+        btn.innerHTML = '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px; animation: spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>Đang chạy...</span>';
+        btn.disabled = true;
+      }}
+      fetch('/api/feeds/' + slug + '/reprocess', {{ method: 'POST' }})
+        .then(r => {{
+          if (!r.ok) throw new Error('Không thể chạy lại rule cho ' + slug);
+          return r.json();
+        }})
+        .then(d => {{
+          showToast('⚡ Đã chạy lại Rule: ' + d.raw_count + ' ➔ ' + d.output_count + ' bài');
+          if (btn && btn.dataset.origHtml) {{
+            btn.innerHTML = btn.dataset.origHtml;
+            btn.disabled = false;
+          }}
+          const modal = document.getElementById('modalCompareOutput');
+          if (modal && modal.classList.contains('open') && currentCmpSlug === slug) {{
+            loadCompareModalData(slug);
+          }}
+          setTimeout(() => location.reload(), 1000);
+        }})
+        .catch(e => {{
+          showToast('Lỗi khi chạy lại Rule: ' + e, true);
+          if (btn && btn.dataset.origHtml) {{
+            btn.innerHTML = btn.dataset.origHtml;
+            btn.disabled = false;
+          }}
+        }});
+    }}
+
+    function reprocessAllFeeds(btn) {{
+      if (btn) {{
+        btn.dataset.origHtml = btn.innerHTML;
+        btn.innerHTML = '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; animation: spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>Đang chạy lại toàn bộ...</span>';
+        btn.disabled = true;
+      }}
+      fetch('/api/reprocess-all', {{ method: 'POST' }})
+        .then(r => {{
+          if (!r.ok) throw new Error('Không thể chạy lại toàn bộ rules');
+          return r.json();
+        }})
+        .then(d => {{
+          showToast('⚡ Đã hoàn tất chạy lại Rule cho toàn bộ ' + (d.feeds ? d.feeds.length : '') + ' kênh!');
+          setTimeout(() => location.reload(), 1000);
+        }})
+        .catch(e => {{
+          showToast('Lỗi khi chạy lại toàn bộ: ' + e, true);
+          if (btn && btn.dataset.origHtml) {{
+            btn.innerHTML = btn.dataset.origHtml;
+            btn.disabled = false;
+          }}
+        }});
+    }}
+
+    function reprocessModalFeed() {{
+      if (!currentCmpSlug) return;
+      const btn = document.getElementById('btnCmpReprocess');
+      reprocessFeed(currentCmpSlug, btn);
+    }}
+
+    function scrapeModalFeed() {{
+      if (!currentCmpSlug) return;
+      const btn = document.getElementById('btnCmpScrape');
+      if (btn) {{
+        btn.dataset.origHtml = btn.innerHTML;
+        btn.innerHTML = '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px; animation: spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>Đang cào...</span>';
+        btn.disabled = true;
+      }}
+      fetch('/api/refresh/' + currentCmpSlug)
+        .then(r => {{
+          if (!r.ok) throw new Error('Cào mới thất bại');
+          return r.json();
+        }})
+        .then(d => {{
+          showToast('Đã cào mới thành công: ' + (d.output_count !== undefined ? d.raw_count + ' ➔ ' + d.output_count : d.count) + ' bài viết');
+          if (btn && btn.dataset.origHtml) {{
+            btn.innerHTML = btn.dataset.origHtml;
+            btn.disabled = false;
+          }}
+          loadCompareModalData(currentCmpSlug);
+        }})
+        .catch(e => {{
+          showToast('Lỗi khi cào mới: ' + e, true);
+          if (btn && btn.dataset.origHtml) {{
+            btn.innerHTML = btn.dataset.origHtml;
+            btn.disabled = false;
+          }}
+        }});
     }}
 
     function toggleFeedPreview(slug) {{

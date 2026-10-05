@@ -26,7 +26,15 @@ def generate_rss_xml(tag: str, posts: list, base_url: str = "https://rss.data1bo
     ]
 
     for p in processed_posts:
-        pub_date = format_datetime(p["_formatted_date"])
+        raw_dt = p.get("_formatted_date")
+        if isinstance(raw_dt, str):
+            try:
+                raw_dt = datetime.fromisoformat(raw_dt)
+            except Exception:
+                raw_dt = datetime.now(timezone.utc)
+        elif not isinstance(raw_dt, datetime):
+            raw_dt = datetime.now(timezone.utc)
+        pub_date = format_datetime(raw_dt)
         post_url = p.get("url", "")
         item_title = p["_formatted_title"]
         creator = p["_formatted_creator"]

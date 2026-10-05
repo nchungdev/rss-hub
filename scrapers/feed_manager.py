@@ -195,9 +195,6 @@ def get_feed_posts(slug: str, force_refresh: bool = False) -> list:
     target = meta.get("target", slug)
     cookie = resolve_effective_cookie(meta)
 
-    if feed_type == "threads":
-        return get_threads_feed(target, force_refresh, custom_cookie=cookie)
-
     cache_file = os.path.join(DATA_DIR, f"history_{slug}.json")
 
     # If cached and not force_refresh
@@ -211,6 +208,17 @@ def get_feed_posts(slug: str, force_refresh: bool = False) -> list:
                     return list(data.values())
         except Exception:
             pass
+
+    if feed_type == "threads":
+        posts = get_threads_feed(target, force_refresh, custom_cookie=cookie)
+        if posts:
+            try:
+                os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(posts, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                logger.warning(f"Failed to write slug cache for threads {slug}: {e}")
+        return posts
 
     # Generic Web Scraper (HTML to RSS)
     if feed_type in ("web", "generic_web"):
