@@ -1467,6 +1467,9 @@ async def dashboard(request: Request):
       .footer-stat-chip.clickable:hover {{
         transform: translateY(-1px);
         box-shadow: 0 4px 12px rgba(245, 158, 11, 0.35);
+      }}
+    }}
+
     /* Main Tabs Styling */
     .main-tab-content {{
       animation: tabFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -1677,7 +1680,7 @@ async def dashboard(request: Request):
         <div class="kpi-strip">
           <div class="kpi-box">
             <div class="kpi-icon" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8;">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="19" r="1.5"/><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><circle cx="5" cy="19" r="1.5"/><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/></svg>
             </div>
             <div class="kpi-info">
               <div class="kpi-label">Scrapers Đang Chạy</div>
@@ -1686,7 +1689,7 @@ async def dashboard(request: Request):
           </div>
           <div class="kpi-box">
             <div class="kpi-icon" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
             </div>
             <div class="kpi-info">
               <div class="kpi-label">Bài Viết Đã Cào</div>
@@ -1695,7 +1698,7 @@ async def dashboard(request: Request):
           </div>
           <div class="kpi-box clickable" onclick="openAllIntervalsModal()" style="cursor: pointer;" title="Bấm để xem và sửa lịch cào">
             <div class="kpi-icon" style="background: rgba(168, 85, 247, 0.15); color: #c084fc;">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             </div>
             <div class="kpi-info">
               <div class="kpi-label">Lịch Cào Ngầm ⚙️</div>
@@ -1704,7 +1707,7 @@ async def dashboard(request: Request):
           </div>
           <div class="kpi-box clickable" onclick="switchMainTab('profiles')" style="cursor: pointer;" title="Bấm để chuyển sang Quản lý Profile">
             <div class="kpi-icon" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             </div>
             <div class="kpi-info">
               <div class="kpi-label">Kho Profile 🌐</div>
