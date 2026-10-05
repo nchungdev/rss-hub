@@ -3555,6 +3555,16 @@ async def dashboard(request: Request):
       }}
     }}
 
+    function escapeHtmlText(str) {{
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }}
+
     function toggleFullContent(id, btn) {{
       const el = document.getElementById(id);
       if (!el) return;
@@ -3563,13 +3573,13 @@ async def dashboard(request: Request):
       if (btn) btn.innerText = isHidden ? 'Thu gọn ▴' : 'Toàn văn ▾';
     }}
 
-    function copyAttachmentLink(url, btn) {{
+    function copyAttachmentLink(btn) {{
+      const url = decodeURIComponent(btn.getAttribute('data-url') || '');
+      if (!url) return;
       navigator.clipboard.writeText(url).then(() => {{
-        if (btn) {{
-          const orig = btn.innerText;
-          btn.innerText = '✓ Đã chép';
-          setTimeout(() => {{ btn.innerText = orig; }}, 2000);
-        }}
+        const orig = btn.innerText;
+        btn.innerText = '✓ Đã chép';
+        setTimeout(() => {{ btn.innerText = orig; }}, 2000);
       }});
     }}
 
@@ -3598,6 +3608,16 @@ async def dashboard(request: Request):
       }}
       const hasFullContentToExpand = cleanFullText.length > summaryText.length + 30;
       const fullTextId = 'full_text_' + type + '_' + idx;
+      const safeSummary = escapeHtmlText(summaryText);
+      const safeFullText = escapeHtmlText(cleanFullText);
+
+      const expandBtnHtml = hasFullContentToExpand
+        ? `<button type="button" onclick="toggleFullContent('${{fullTextId}}', this)" style="background:none; border:none; color:var(--text-dim); font-size:0.68rem; cursor:pointer; text-decoration:underline;">Toàn văn ▾</button>`
+        : '';
+
+      const fullContentHtml = hasFullContentToExpand
+        ? `<div id="${{fullTextId}}" style="display:none; margin-top:8px; padding-top:8px; border-top:1px dashed rgba(255,255,255,0.08); font-size:0.75rem; color:var(--text-muted); line-height:1.5; word-break: break-word;">${{safeFullText}}</div>`
+        : '';
 
       // 2. IMAGES & VIDEOS
       const rawImages = item._formatted_images || item.images || [];
@@ -3715,7 +3735,7 @@ async def dashboard(request: Request):
                 </a>
               </div>
               <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
-                <button type="button" class="btn" onclick="copyAttachmentLink('${{att.url}}', this)" style="height: 22px; padding: 0 6px; font-size: 0.65rem;" title="Chép URL">
+                <button type="button" class="btn" data-url="${{encodeURIComponent(att.url)}}" onclick="copyAttachmentLink(this)" style="height: 22px; padding: 0 6px; font-size: 0.65rem;" title="Chép URL">
                   Chép
                 </button>
                 <a href="${{att.url}}" target="_blank" rel="noopener" class="btn primary" style="height: 22px; padding: 0 7px; font-size: 0.65rem;" title="Mở link hoặc tải về">
@@ -3778,10 +3798,10 @@ async def dashboard(request: Request):
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
                   <span>Tóm tắt nội dung</span>
                 </span>
-                ${{hasFullContentToExpand ? '<button type="button" onclick="toggleFullContent(\'' + fullTextId + '\', this)" style="background:none; border:none; color:var(--text-dim); font-size:0.68rem; cursor:pointer; text-decoration:underline;">Toàn văn ▾</button>' : ''}}
+                ${{expandBtnHtml}}
               </div>
-              <div style="font-size: 0.78rem; color: #cbd5e1; line-height: 1.5; word-break: break-word;">${{summaryText}}</div>
-              ${{hasFullContentToExpand ? '<div id="' + fullTextId + '" style="display:none; margin-top:8px; padding-top:8px; border-top:1px dashed rgba(255,255,255,0.08); font-size:0.75rem; color:var(--text-muted); line-height:1.5; word-break: break-word;">' + cleanFullText + '</div>' : ''}}
+              <div style="font-size: 0.78rem; color: #cbd5e1; line-height: 1.5; word-break: break-word;">${{safeSummary}}</div>
+              ${{fullContentHtml}}
             </div>
 
             <!-- 2. IMAGE & VIDEO MEDIA -->
