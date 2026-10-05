@@ -424,9 +424,9 @@ async def dashboard(request: Request):
                     </button>
 
                     <!-- Edit Scraper Config -->
-                    <button class="btn" onclick="editFeedModal('{slug}')" title="Sửa cấu hình Feed này" style="height: 30px; padding: 0 9px; font-size: 0.74rem;">
+                    <button class="btn" onclick="editFeedModal('{slug}')" title="Cấu hình Scraper, Tần suất & Cookie" style="height: 30px; padding: 0 9px; font-size: 0.74rem;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                        <span>Sửa</span>
+                        <span>Cấu hình</span>
                     </button>
 
                     <!-- Refresh / Scrape Now -->
@@ -1492,28 +1492,45 @@ async def dashboard(request: Request):
           <textarea id="feedDesc" class="form-textarea" rows="2" placeholder="Mô tả nội dung kênh feed này..."></textarea>
         </div>
 
-        <!-- 3.1 TẦN SUẤT CÀO DỮ LIỆU CỦA SCRAPER NÀY -->
-        <div class="form-group">
-          <label class="form-label">Tần suất cào dữ liệu của Scraper này *</label>
-          <select id="feedInterval" class="form-select" style="font-size: 0.85rem;">
-            <option value="5">⚡ 5 phút / lần (Cập nhật cực nhanh)</option>
-            <option value="10">⚡ 10 phút / lần</option>
-            <option value="15">15 phút / lần</option>
-            <option value="30" selected>30 phút / lần (Tiêu chuẩn khuyến nghị)</option>
-            <option value="60">1 giờ / lần (60 phút)</option>
-            <option value="120">2 giờ / lần (120 phút)</option>
-            <option value="360">6 giờ / lần (360 phút)</option>
-            <option value="720">12 giờ / lần (720 phút)</option>
-            <option value="1440">24 giờ / lần (1 ngày)</option>
-          </select>
-          <div class="form-hint">Mỗi Scraper hoạt động với chu kỳ cào riêng độc lập, tự động quét theo đúng lịch hẹn đã chọn.</div>
+        <!-- 4. CẤU HÌNH TẦN SUẤT CÀO DỮ LIỆU (SCRAPE INTERVAL) -->
+        <div style="background: rgba(7, 12, 24, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 0.82rem; font-weight: 700; color: #c084fc;">⏱️ Cấu hình Tần suất Cào (Scrape Interval) *</span>
+            </div>
+            <span style="font-size: 0.68rem; color: var(--text-dim);">Chu kỳ quét ngầm độc lập</span>
+          </div>
+
+          <div style="margin-bottom: 10px;">
+            <label class="form-label" style="margin-bottom: 6px;">Chọn nhanh chu kỳ cào định kỳ:</label>
+            <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;">
+              <button type="button" class="preset-interval-btn" onclick="selectFormPresetInterval(5)" id="btnFormPreset5" style="padding: 7px 4px; font-size: 0.75rem;">⚡ 5m</button>
+              <button type="button" class="preset-interval-btn" onclick="selectFormPresetInterval(10)" id="btnFormPreset10" style="padding: 7px 4px; font-size: 0.75rem;">⚡ 10m</button>
+              <button type="button" class="preset-interval-btn" onclick="selectFormPresetInterval(15)" id="btnFormPreset15" style="padding: 7px 4px; font-size: 0.75rem;">15m</button>
+              <button type="button" class="preset-interval-btn" onclick="selectFormPresetInterval(30)" id="btnFormPreset30" style="padding: 7px 4px; font-size: 0.75rem;">30m</button>
+              <button type="button" class="preset-interval-btn" onclick="selectFormPresetInterval(60)" id="btnFormPreset60" style="padding: 7px 4px; font-size: 0.75rem;">1h (60m)</button>
+              <button type="button" class="preset-interval-btn" onclick="selectFormPresetInterval(120)" id="btnFormPreset120" style="padding: 7px 4px; font-size: 0.75rem;">2h</button>
+              <button type="button" class="preset-interval-btn" onclick="selectFormPresetInterval(360)" id="btnFormPreset360" style="padding: 7px 4px; font-size: 0.75rem;">6h</button>
+              <button type="button" class="preset-interval-btn" onclick="selectFormPresetInterval(720)" id="btnFormPreset720" style="padding: 7px 4px; font-size: 0.75rem;">12h</button>
+              <button type="button" class="preset-interval-btn" onclick="selectFormPresetInterval(1440)" id="btnFormPreset1440" style="padding: 7px 4px; font-size: 0.75rem;">24h (1 ngày)</button>
+            </div>
+          </div>
+
+          <div>
+            <label class="form-label" style="font-size: 0.75rem;">Hoặc nhập số phút tùy chỉnh:</label>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <input type="number" id="feedInterval" class="form-input" min="1" max="1440" required value="30" style="font-weight: 700; font-size: 0.95rem; width: 120px; font-family: var(--mono);" oninput="updateFormPresetHighlight(this.value)">
+              <span style="color: var(--text-muted); font-size: 0.8rem; font-weight: 600;">phút / lần cào</span>
+            </div>
+            <div class="form-hint" style="margin-top: 6px;">Mỗi Scraper hoạt động với chu kỳ cào riêng độc lập, hệ thống sẽ tự động cào bài mới theo đúng số phút đã đặt.</div>
+          </div>
         </div>
 
-        <!-- 4. CẤU HÌNH COOKIE XÁC THỰC CHO SCRAPER -->
+        <!-- 5. CẤU HÌNH COOKIE XÁC THỰC CHO SCRAPER -->
         <div style="background: rgba(7, 12, 24, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; margin-bottom: 16px;">
           <div class="form-group" style="margin-bottom: 10px;">
             <label class="form-label" style="display:flex; align-items:center; justify-content:space-between;">
-              <span>Cấu hình Cookie cho Scraper này</span>
+              <span style="font-weight: 700; color: #38bdf8;">🔑 5. Cấu hình Cookie Xác thực cho Scraper</span>
               <a href="javascript:void(0)" onclick="openCookieVaultModal()" style="color:#38bdf8; font-size:0.72rem; text-decoration:none;">Quản lý Kho Cookie &rarr;</a>
             </label>
             <select id="feedCookieMode" class="form-select" onchange="handleCookieModeChange(this.value)">
@@ -1547,11 +1564,11 @@ async def dashboard(request: Request):
           </div>
         </div>
 
-        <!-- 5. TÙY BIẾN ĐỊNH DẠNG ĐẦU RA (CUSTOM OUTPUT & FILTERS) -->
+        <!-- 6. TÙY BIẾN ĐỊNH DẠNG ĐẦU RA (CUSTOM OUTPUT & FILTERS) -->
         <div style="background: rgba(7, 12, 24, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; margin-bottom: 16px;">
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
             <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="font-size: 0.8rem; font-weight: 700; color: #38bdf8;">⚙️ Cấu hình Định dạng Đầu ra (Custom Output &amp; Filters)</span>
+              <span style="font-size: 0.8rem; font-weight: 700; color: #38bdf8;">⚙️ 6. Cấu hình Định dạng Đầu ra (Custom Output &amp; Filters)</span>
             </div>
             <span style="font-size: 0.68rem; color: var(--text-dim);">Tùy chỉnh RSS / JSON / Atom</span>
           </div>
@@ -1886,6 +1903,7 @@ async def dashboard(request: Request):
       if (document.getElementById('outFilterInclude')) document.getElementById('outFilterInclude').value = '';
       if (document.getElementById('outFilterExclude')) document.getElementById('outFilterExclude').value = '';
       if (document.getElementById('feedInterval')) document.getElementById('feedInterval').value = '30';
+      updateFormPresetHighlight(30);
 
       const title = document.getElementById('modalAddTitle');
       if (title) title.innerText = 'Tạo Kênh RSS Mới (Universal Feed Generator)';
@@ -1975,10 +1993,12 @@ async def dashboard(request: Request):
           if (document.getElementById('outIncludeEnclosures')) document.getElementById('outIncludeEnclosures').checked = cOut.include_enclosures !== false;
           if (document.getElementById('outFilterInclude')) document.getElementById('outFilterInclude').value = cOut.filter_include || '';
           if (document.getElementById('outFilterExclude')) document.getElementById('outFilterExclude').value = cOut.filter_exclude || '';
-          if (document.getElementById('feedInterval')) document.getElementById('feedInterval').value = String(f.interval_minutes || 30);
+          const feedIntervalVal = parseInt(f.interval_minutes) || 30;
+          if (document.getElementById('feedInterval')) document.getElementById('feedInterval').value = String(feedIntervalVal);
+          updateFormPresetHighlight(feedIntervalVal);
 
           const title = document.getElementById('modalAddTitle');
-          if (title) title.innerText = 'Chỉnh sửa Cấu hình Kênh: ' + (f.title || f.slug);
+          if (title) title.innerText = 'Cấu hình Kênh Scraper: ' + (f.title || f.slug);
           const btnText = document.getElementById('btnSubmitFeedText');
           if (btnText) btnText.innerText = 'Cập nhật Cấu hình';
 
@@ -2332,6 +2352,27 @@ async def dashboard(request: Request):
       document.getElementById('inputFeedIntervalVal').value = val;
       updateFeedPresetHighlight(val);
       openModal('modalFeedInterval');
+    }}
+
+    function selectFormPresetInterval(val) {{
+      const input = document.getElementById('feedInterval');
+      if (input) input.value = val;
+      updateFormPresetHighlight(val);
+    }}
+
+    function updateFormPresetHighlight(val) {{
+      val = parseInt(val);
+      document.querySelectorAll('#formAddFeed .preset-interval-btn').forEach(b => {{
+        b.style.borderColor = 'var(--card-border)';
+        b.style.background = 'rgba(255, 255, 255, 0.04)';
+        b.style.color = 'var(--text-muted)';
+      }});
+      const activeBtn = document.getElementById('btnFormPreset' + val);
+      if (activeBtn) {{
+        activeBtn.style.borderColor = '#c084fc';
+        activeBtn.style.background = 'rgba(192, 132, 252, 0.2)';
+        activeBtn.style.color = '#e9d5ff';
+      }}
     }}
 
     function selectFeedPresetInterval(val) {{
