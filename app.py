@@ -1282,95 +1282,56 @@ async def dashboard(request: Request):
   <!-- MAIN SCROLLABLE VIEWPORT -->
   <div class="torbox-main-viewport">
     <header class="topbar-header">
-      <div style="display: flex; align-items: center; gap: 14px; min-width: 0;">
+      <div style="display: flex; align-items: center; gap: 12px; min-width: 0; flex-wrap: wrap;">
         <button class="hamburger-btn" onclick="toggleSidebar(true)">☰</button>
-        <h1 class="page-title">Quản lý Feeds &amp; Cấu hình Nguồn</h1>
+        <h1 class="page-title" style="margin: 0; white-space: nowrap;">Quản lý Feeds &amp; Cấu hình Nguồn</h1>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 999px; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; display: inline-flex; align-items: center; gap: 4px;" title="Tổng số kênh Feed">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 11px; height: 11px;"><circle cx="5" cy="19" r="1.5"/><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/></svg>
+            <span>{len(feeds)} Kênh</span>
+          </span>
+          <span style="background: rgba(16, 185, 129, 0.12); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 999px; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; display: inline-flex; align-items: center; gap: 4px;" title="Tổng số bài viết đã cào">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 11px; height: 11px;"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+            <span>{total_posts} Bài</span>
+          </span>
+          <span style="background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 999px; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; display: inline-flex; align-items: center; gap: 5px;" title="Gateway Online: rss.data1box.win">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981;"></span>
+            <span>Online</span>
+          </span>
+        </div>
       </div>
 
-      <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
-        <button class="btn" onclick="openAllIntervalsModal()" title="Xem và điều chỉnh lịch cào của từng Scraper">
+      <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+        <button class="btn" onclick="openAllIntervalsModal()" title="Xem và điều chỉnh lịch cào của từng Scraper" style="height: 32px; font-size: 0.76rem;">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           <span>Tần suất cào</span>
         </button>
-        <button class="btn" onclick="openCookieVaultModal()" title="Quản lý Kho Cookie theo Trang web &amp; Scraper">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px; height:15px;"><path d="M21 2l-2 2m-1.5 1.5L14 9l-1.5-1.5L11 9l-1.5-1.5L8 9l-1.5-1.5-4 4a5 5 0 0 0 7 7l4-4 1.5 1.5L16 15l1.5-1.5L19 15l1.5-1.5 2-2"/></svg>
+        <button class="btn" onclick="openCookieVaultModal()" title="Quản lý Kho Cookie theo Trang web &amp; Scraper" style="height: 32px; font-size: 0.76rem;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px;"><path d="M21 2l-2 2m-1.5 1.5L14 9l-1.5-1.5L11 9l-1.5-1.5L8 9l-1.5-1.5-4 4a5 5 0 0 0 7 7l4-4 1.5 1.5L16 15l1.5-1.5L19 15l1.5-1.5 2-2"/></svg>
           <span>Kho Cookie</span>
         </button>
-        <button class="btn primary" onclick="openAddFeedModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <button class="btn primary" onclick="openAddFeedModal()" style="height: 32px; font-size: 0.76rem;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 15px; height: 15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           <span>Thêm kênh Feed</span>
         </button>
-        <button id="btnRefreshTop" class="btn" onclick="refreshAllFeeds()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+        <button id="btnRefreshTop" class="btn" onclick="refreshAllFeeds()" style="height: 32px; font-size: 0.76rem;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 15px; height: 15px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
           <span>Làm mới</span>
         </button>
       </div>
     </header>
 
     <main>
-      <!-- Stats Grid (Suite Template) -->
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-card-icon stat-blue">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="19" r="1.5"/><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/></svg>
-          </div>
-          <div class="stat-info">
-            <div class="label">Tổng số Feed</div>
-            <div class="val">{len(feeds)} Kênh</div>
-            <div class="desc">Web, Threads, RSSHub</div>
-          </div>
-        </div>
-
-        <div class="stat-card">
-          <div class="stat-card-icon stat-emerald">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-          </div>
-          <div class="stat-info">
-            <div class="label">Bài viết đã cào</div>
-            <div class="val">{total_posts} Bài</div>
-            <div class="desc">Tự động phân loại Ebook</div>
-          </div>
-        </div>
-
-        <div class="stat-card clickable" onclick="openAllIntervalsModal()" title="Bấm để xem lịch cào riêng của từng Scraper">
-          <div class="stat-card-icon stat-violet">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          </div>
-          <div class="stat-info">
-            <div class="label" style="display: flex; align-items: center; justify-content: space-between;">
-              <span>Chu kỳ cào</span>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px; opacity: 0.7;"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-            </div>
-            <div class="val">Riêng từng kênh</div>
-            <div class="desc">{len(feeds)} Scrapers độc lập</div>
-          </div>
-        </div>
-
-        <div class="stat-card">
-          <div class="stat-card-icon stat-amber">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-          </div>
-          <div class="stat-info">
-            <div class="label">Public Gateway</div>
-            <div class="val">Online</div>
-            <div class="desc">rss.data1box.win</div>
-          </div>
-        </div>
-      </div>
-
       <!-- Controls Bar & Filter Pills -->
-      <div class="controls-bar">
+      <div class="controls-bar" style="margin-bottom: 14px; margin-top: 4px;">
         <div class="filter-pills">
           {cat_pills}
         </div>
 
-        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-          <button class="btn primary" onclick="openAddFeedModal()" title="Thêm nguồn RSS mới">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            <span>Thêm kênh mới</span>
-          </button>
-          <button class="btn" onclick="location.reload()" title="Làm mới trang">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button class="btn primary" onclick="openAddFeedModal()" title="Thêm nguồn RSS mới" style="height: 30px; font-size: 0.74rem;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>+ Kênh mới</span>
           </button>
         </div>
       </div>
