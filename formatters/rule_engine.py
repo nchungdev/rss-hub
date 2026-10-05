@@ -19,7 +19,7 @@ BUILTIN_RULES = {
         "description": "Tự động xóa các đoạn text quảng cáo, tiếp thị liên kết (Shopee, Lazada, bit.ly, t.co...) và bài PR.",
         "rule_type": "replace",
         "target_field": "both",
-        "pattern": r"(?i)(\[?(quảng cáo|qc|ad|ads|tài trợ|ưu đãi|mua hàng ngay)\]?:?.*?(\n|$)|https?://(shope\.ee|s\.lazada\.vn|tiki\.vn|vt\.tiktok\.com|bit\.ly|tinyurl\.com|t\.co)/\S+)",
+        "pattern": r"(?i)(\[(quảng cáo|qc|ad|ads|tài trợ|ưu đãi|mua hàng ngay)\]|\b(quảng cáo|tài trợ|ưu đãi|mua hàng ngay)\b:?.*?(\n|$)|https?://(shope\.ee|s\.lazada\.vn|tiki\.vn|vt\.tiktok\.com|bit\.ly|tinyurl\.com|t\.co)/\S+)",
         "replacement": "",
         "is_regex": True,
         "case_sensitive": False,
@@ -333,10 +333,11 @@ def apply_extract_links_rule(post: dict, rule: dict) -> dict:
 
     # Google Drive & Google Docs
     if "gdrive" in link_types:
-        d_links = re.findall(r"https?://(?:drive\.google\.com/(?:file/d/|folderview\?id=|drive/(?:mobile/)?folders/|open\?id=)[a-zA-Z0-9_-]+|docs\.google\.com/(?:spreadsheets|document)/d/[a-zA-Z0-9_-]+)", text)
+        d_links = re.findall(r"https?://(?:drive|docs)\.google\.com/[^\s<>'\"\)\]]+", text)
         for dl in d_links:
-            if dl not in extracted:
-                extracted.append(dl)
+            dl_clean = dl.rstrip(".,;:!?'\"")
+            if dl_clean not in extracted:
+                extracted.append(dl_clean)
 
     # Fshare
     if "fshare" in link_types:

@@ -2,6 +2,7 @@ import os
 import json
 import re
 import logging
+import urllib.parse
 from datetime import datetime, timezone, timedelta
 import requests
 
@@ -135,9 +136,22 @@ def fetch_threads_posts(tag: str = "bookthreads", max_timeout: int = 60000, cust
         text_post_app_info = p.get("text_post_app_info", {})
         link_preview = text_post_app_info.get("link_preview_attachment") if isinstance(text_post_app_info, dict) else None
         
-        gdrive_links = re.findall(r'https?://drive\.google\.com/[^\s<>"]+', text)
         preview_title = link_preview.get("title") if link_preview else None
-        preview_url = link_preview.get("url") if link_preview else None
+        raw_preview_url = link_preview.get("url") if link_preview else None
+        preview_url = raw_preview_url
+        if preview_url and "l.threads.com" in preview_url:
+            try:
+                parsed_u = urllib.parse.urlparse(preview_url)
+                qs = urllib.parse.parse_qs(parsed_u.query)
+                if "u" in qs and qs["u"]:
+                    preview_url = qs["u"][0]
+            except Exception:
+                pass
+
+        gdrive_links = re.findall(r'https?://(?:drive|docs)\.google\.com/[^\s<>"]+', text)
+        if preview_url and any(d in preview_url for d in ["drive.google.com", "docs.google.com"]):
+            if preview_url not in gdrive_links:
+                gdrive_links.append(preview_url)
 
         images = []
         if "image_versions2" in p:

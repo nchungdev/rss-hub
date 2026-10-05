@@ -2152,10 +2152,13 @@ async def dashboard(request: Request):
               </button>
             </div>
 
-            <select id="outputFeedFilter" class="form-input" style="height: 32px; font-size: 0.76rem; width: 190px;" onchange="onOutputFeedFilterChange(this.value)">
+            <select id="outputFeedFilter" class="form-input" style="height: 32px; font-size: 0.76rem; width: 175px;" onchange="onOutputFeedFilterChange(this.value)">
               <option value="all">🔍 Tất cả Kênh Feed</option>
             </select>
-            <input type="text" id="outputPostSearch" class="form-input" placeholder="🔍 Tìm kiếm bài viết..." style="height: 32px; font-size: 0.76rem; width: 190px;" oninput="onOutputPostSearch(this.value)">
+            <button type="button" class="btn" id="btnOutputFilterAttach" onclick="toggleOutputFilterAttach()" style="height: 32px; padding: 0 9px; font-size: 0.72rem; color: #10b981; border-color: rgba(16,185,129,0.3);" title="Chỉ lọc bài viết có Google Drive hoặc File đính kèm">
+              <span>☁️ Có Drive/File</span>
+            </button>
+            <input type="text" id="outputPostSearch" class="form-input" placeholder="🔍 Tìm kiếm bài viết, drive..." style="height: 32px; font-size: 0.76rem; width: 175px;" oninput="onOutputPostSearch(this.value)">
             <button type="button" class="btn" onclick="reloadAllPostsData()" style="height: 32px; padding: 0 10px; font-size: 0.74rem;" title="Làm mới lại dữ liệu">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
               <span>Làm mới</span>
@@ -2195,10 +2198,13 @@ async def dashboard(request: Request):
               </button>
             </div>
 
-            <select id="rawFeedFilter" class="form-input" style="height: 32px; font-size: 0.76rem; width: 190px;" onchange="onRawFeedFilterChange(this.value)">
+            <select id="rawFeedFilter" class="form-input" style="height: 32px; font-size: 0.76rem; width: 175px;" onchange="onRawFeedFilterChange(this.value)">
               <option value="all">🔍 Tất cả Kênh Feed</option>
             </select>
-            <input type="text" id="rawPostSearch" class="form-input" placeholder="🔍 Tìm kiếm bài viết gốc..." style="height: 32px; font-size: 0.76rem; width: 190px;" oninput="onRawPostSearch(this.value)">
+            <button type="button" class="btn" id="btnRawFilterAttach" onclick="toggleRawFilterAttach()" style="height: 32px; padding: 0 9px; font-size: 0.72rem; color: #38bdf8; border-color: rgba(56,189,248,0.3);" title="Chỉ lọc bài viết có Google Drive hoặc File đính kèm">
+              <span>☁️ Có Drive/File</span>
+            </button>
+            <input type="text" id="rawPostSearch" class="form-input" placeholder="🔍 Tìm kiếm bài viết gốc, drive..." style="height: 32px; font-size: 0.76rem; width: 175px;" oninput="onRawPostSearch(this.value)">
             <button type="button" class="btn" onclick="reloadAllPostsData()" style="height: 32px; padding: 0 10px; font-size: 0.74rem;" title="Làm mới lại dữ liệu">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
               <span>Làm mới</span>
@@ -3374,8 +3380,55 @@ async def dashboard(request: Request):
     let currentOutputSearchQuery = '';
     let currentRawFeedFilter = 'all';
     let currentRawSearchQuery = '';
+    let currentOutputOnlyAttach = false;
+    let currentRawOnlyAttach = false;
     let outputViewMode = 'grid'; // 'grid' | 'list'
     let rawViewMode = 'grid'; // 'grid' | 'list'
+
+    function postHasAttachmentsOrDrive(p) {{
+      if (p._attachments && p._attachments.length > 0) return true;
+      if (p.gdrive_links && p.gdrive_links.length > 0) return true;
+      const combined = (p.text || '') + ' ' + (p.content || '') + ' ' + (p.preview_url || '') + ' ' + (p.url || '');
+      return /https?:\\/\\/(?:drive|docs)\\.google\\.com|mega\\.nz|mediafire|fshare|dropbox|1drv\\.ms|\\.(?:pdf|epub|mobi|zip|rar)/i.test(combined);
+    }}
+
+    function toggleOutputFilterAttach() {{
+      currentOutputOnlyAttach = !currentOutputOnlyAttach;
+      const btn = document.getElementById('btnOutputFilterAttach');
+      if (btn) {{
+        if (currentOutputOnlyAttach) {{
+          btn.style.background = 'rgba(16, 185, 129, 0.2)';
+          btn.style.color = '#34d399';
+          btn.style.borderColor = '#10b981';
+          btn.innerHTML = '<span>✓ Đang lọc Drive/File</span>';
+        }} else {{
+          btn.style.background = '';
+          btn.style.color = '#10b981';
+          btn.style.borderColor = 'rgba(16,185,129,0.3)';
+          btn.innerHTML = '<span>☁️ Có Drive/File</span>';
+        }}
+      }}
+      renderOutputPostsList();
+    }}
+
+    function toggleRawFilterAttach() {{
+      currentRawOnlyAttach = !currentRawOnlyAttach;
+      const btn = document.getElementById('btnRawFilterAttach');
+      if (btn) {{
+        if (currentRawOnlyAttach) {{
+          btn.style.background = 'rgba(56, 189, 248, 0.2)';
+          btn.style.color = '#38bdf8';
+          btn.style.borderColor = '#38bdf8';
+          btn.innerHTML = '<span>✓ Đang lọc Drive/File</span>';
+        }} else {{
+          btn.style.background = '';
+          btn.style.color = '#38bdf8';
+          btn.style.borderColor = 'rgba(56,189,248,0.3)';
+          btn.innerHTML = '<span>☁️ Có Drive/File</span>';
+        }}
+      }}
+      renderRawPostsList();
+    }}
 
     function setOutputViewLayout(mode) {{
       outputViewMode = mode;
@@ -3509,15 +3562,17 @@ async def dashboard(request: Request):
 
       let filtered = dashAllOutputPosts.filter(p => {{
         if (feed !== 'all' && p._feed_slug !== feed) return false;
+        if (currentOutputOnlyAttach && !postHasAttachmentsOrDrive(p)) return false;
         if (!q) return true;
-        const text = (p._formatted_title || p.title || p.preview_title || '') + ' ' + (p._formatted_html || p.text || p.content || '') + ' ' + (p._feed_title || '') + ' ' + (p.url || '');
+        const attachStr = (p._attachments || []).map(a => (a.title || '') + ' ' + (a.url || '')).join(' ');
+        const text = (p._formatted_title || p.title || p.preview_title || '') + ' ' + (p._formatted_html || p.text || p.content || '') + ' ' + (p._feed_title || '') + ' ' + (p.url || '') + ' ' + (p.gdrive_links || []).join(' ') + ' ' + (p.preview_url || '') + ' ' + attachStr;
         return text.toLowerCase().includes(q);
       }});
 
       const badge = document.getElementById('outputTabBadge');
-      if (badge) badge.innerText = filtered.length + ' bài' + (feed !== 'all' ? ' (Lọc)' : '');
+      if (badge) badge.innerText = filtered.length + ' bài' + (feed !== 'all' || currentOutputOnlyAttach ? ' (Lọc)' : '');
       const statusEl = document.getElementById('outputFilterStatus');
-      if (statusEl) statusEl.innerText = (feed === 'all' ? 'Tất cả kênh' : feed) + (q ? ' • Tìm: "' + q + '"' : '');
+      if (statusEl) statusEl.innerText = (feed === 'all' ? 'Tất cả kênh' : feed) + (currentOutputOnlyAttach ? ' • Có Drive/File' : '') + (q ? ' • Tìm: "' + q + '"' : '');
 
       const outList = document.getElementById('outputPostsList');
       if (outList) {{
@@ -3535,15 +3590,16 @@ async def dashboard(request: Request):
 
       let filtered = dashAllRawPosts.filter(p => {{
         if (feed !== 'all' && p._feed_slug !== feed) return false;
+        if (currentRawOnlyAttach && !postHasAttachmentsOrDrive(p)) return false;
         if (!q) return true;
-        const text = (p.preview_title || p.title || p.text || '') + ' ' + (p.url || '') + ' ' + (p._feed_title || '');
+        const text = (p.preview_title || p.title || p.text || '') + ' ' + (p.url || '') + ' ' + (p.preview_url || '') + ' ' + (p.gdrive_links || []).join(' ') + ' ' + (p._feed_title || '');
         return text.toLowerCase().includes(q);
       }});
 
       const badge = document.getElementById('rawTabBadge');
-      if (badge) badge.innerText = filtered.length + ' bài' + (feed !== 'all' ? ' (Lọc)' : '');
+      if (badge) badge.innerText = filtered.length + ' bài' + (feed !== 'all' || currentRawOnlyAttach ? ' (Lọc)' : '');
       const statusEl = document.getElementById('rawFilterStatus');
-      if (statusEl) statusEl.innerText = (feed === 'all' ? 'Tất cả kênh' : feed) + (q ? ' • Tìm: "' + q + '"' : '');
+      if (statusEl) statusEl.innerText = (feed === 'all' ? 'Tất cả kênh' : feed) + (currentRawOnlyAttach ? ' • Có Drive/File' : '') + (q ? ' • Tìm: "' + q + '"' : '');
 
       const rawList = document.getElementById('rawPostsList');
       if (rawList) {{
@@ -3631,13 +3687,69 @@ async def dashboard(request: Request):
       if (!attachments || attachments.length === 0) {{
         attachments = [];
         const seenUrls = new Set();
-        const gLinks = item.gdrive_links || [];
+        
+        function cleanRedirectUrl(u) {{
+          if (!u) return '';
+          if (u.includes('l.threads.com') && u.includes('u=')) {{
+            try {{
+              const urlObj = new URL(u);
+              const target = urlObj.searchParams.get('u');
+              if (target) return decodeURIComponent(target);
+            }} catch(e) {{}}
+          }}
+          return u;
+        }}
+
+        const combinedRaw = (item.text || '') + ' ' + (item.content || '') + ' ' + (item.description || '');
+        const prevUrl = cleanRedirectUrl(item.preview_url || '');
+
+        // 1. Google Drive & Docs / Sheets
+        const gLinks = (item.gdrive_links || []).map(cleanRedirectUrl);
+        const driveRegex = /https?:\\/\\/(?:drive|docs)\\.google\\.com\\/[^\\s<>"')]+/gi;
+        const textDrive = combinedRaw.match(driveRegex) || [];
+        textDrive.forEach(dl => {{ if (!gLinks.includes(dl)) gLinks.push(dl); }});
+        if (prevUrl && (prevUrl.includes('drive.google.com') || prevUrl.includes('docs.google.com'))) {{
+          if (!gLinks.includes(prevUrl)) gLinks.push(prevUrl);
+        }}
+
         gLinks.forEach(gl => {{
           if (!seenUrls.has(gl)) {{
             seenUrls.add(gl);
-            attachments.push({{ type: 'gdrive', title: item.preview_title || 'Google Drive Ebook / Tài liệu', url: gl, ext: 'gdrive' }});
+            let ext = 'gdrive';
+            let dTitle = 'Google Drive Ebook / Tài liệu';
+            if (gl.includes('spreadsheets')) {{
+              ext = 'gsheet';
+              dTitle = 'Google Sheets (Kho Ebook)';
+            }} else if (gl.includes('document')) {{
+              ext = 'gdoc';
+              dTitle = 'Google Docs Tài liệu';
+            }}
+            attachments.push({{ type: 'gdrive', title: item.preview_title || dTitle, url: gl, ext: ext }});
           }}
         }});
+
+        // 2. Cloud storage
+        const cloudRegex = /https?:\\/\\/(?:www\\.)?(?:mega\\.nz|mediafire\\.com|fshare\\.vn|dropbox\\.com|1drv\\.ms|onedrive\\.live\\.com)\\/[^\\s<>"')]+/gi;
+        const textCloud = combinedRaw.match(cloudRegex) || [];
+        if (prevUrl && prevUrl.match(cloudRegex)) textCloud.push(prevUrl);
+        textCloud.forEach(cl => {{
+          if (!seenUrls.has(cl)) {{
+            seenUrls.add(cl);
+            attachments.push({{ type: 'cloud', title: item.preview_title || 'Tài liệu Lưu trữ Đám mây', url: cl, ext: 'cloud' }});
+          }}
+        }});
+
+        // 3. Direct files
+        const fileRegex = /https?:\\/\\/[^\\s<>"')]+\\.(?:pdf|epub|mobi|azw3?|zip|rar|7z|docx?|xlsx?|mp3|mp4)(?:\\?[^\\s<>"')]*)?/gi;
+        const textFiles = combinedRaw.match(fileRegex) || [];
+        textFiles.forEach(fl => {{
+          if (!seenUrls.has(fl)) {{
+            seenUrls.add(fl);
+            const ext = fl.includes('.') ? fl.split('.').pop().split('?')[0].toLowerCase() : 'file';
+            attachments.push({{ type: 'file', title: fl.split('/').pop().split('?')[0] || 'Tệp đính kèm', url: fl, ext: ext }});
+          }}
+        }});
+
         const extLinks = item._extracted_links || [];
         extLinks.forEach(el => {{
           if (!seenUrls.has(el)) {{
@@ -3713,6 +3825,15 @@ async def dashboard(request: Request):
           if (att.ext === 'gdrive' || (att.url && att.url.includes('drive.google.com'))) {{
             icon = '☁️';
             extUpper = 'GDRIVE';
+          }} else if (att.ext === 'gsheet' || (att.url && att.url.includes('docs.google.com/spreadsheets'))) {{
+            icon = '📊';
+            extUpper = 'GSHEET';
+          }} else if (att.ext === 'gdoc' || (att.url && att.url.includes('docs.google.com/document'))) {{
+            icon = '📄';
+            extUpper = 'GDOC';
+          }} else if (att.ext === 'cloud' || (att.url && /mega\\.nz|mediafire|fshare|dropbox|1drv\\.ms/i.test(att.url))) {{
+            icon = '☁️';
+            extUpper = 'CLOUD';
           }} else if (['EPUB', 'MOBI', 'AZW', 'AZW3'].includes(extUpper)) {{
             icon = '📚';
           }} else if (extUpper === 'PDF') {{
@@ -3758,6 +3879,10 @@ async def dashboard(request: Request):
         `;
       }}
 
+      const hasDrive = attachments.some(a => a.ext === 'gdrive' || (a.url && a.url.includes('drive.google.com')));
+      const hasSheet = attachments.some(a => a.ext === 'gsheet' || (a.url && a.url.includes('docs.google.com/spreadsheets')));
+      const hasOtherFiles = attachments.length > 0 && !hasDrive && !hasSheet;
+
       const jsonId = 'post_' + type + '_' + idx;
       const jsonStr = encodeURIComponent(JSON.stringify(item, null, 2));
       const clickFilterFn = isOut ? `onOutputFeedFilterChange('${{feedSlug}}')` : `onRawFeedFilterChange('${{feedSlug}}')`;
@@ -3771,6 +3896,9 @@ async def dashboard(request: Request):
               <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
                 <span class="badge gray" style="font-size: 0.68rem; cursor: pointer; font-weight: 600;" onclick="${{clickFilterFn}}" title="Lọc theo kênh này">${{feedTitle}}</span>
                 <span class="badge blue" style="font-size: 0.64rem;">${{feedCat}}</span>
+                ${{hasDrive ? '<span class="badge" style="font-size:0.65rem; background:rgba(16,185,129,0.18); color:#34d399; border:1px solid rgba(16,185,129,0.35); font-weight:700;">☁️ Google Drive</span>' : ''}}
+                ${{hasSheet ? '<span class="badge" style="font-size:0.65rem; background:rgba(16,185,129,0.18); color:#34d399; border:1px solid rgba(16,185,129,0.35); font-weight:700;">📊 Google Sheets</span>' : ''}}
+                ${{hasOtherFiles ? '<span class="badge" style="font-size:0.65rem; background:rgba(56,189,248,0.18); color:#38bdf8; border:1px solid rgba(56,189,248,0.35); font-weight:600;">📎 ' + attachments.length + ' File</span>' : ''}}
                 ${{isOut && item._applied_rules && item._applied_rules.length ? '<span style="font-size:0.65rem; color:#a855f7; font-weight:500;">⚡ ' + item._applied_rules.join(', ') + '</span>' : ''}}
                 ${{!isOut ? '<span class="badge" style="font-size:0.64rem; background:rgba(56,189,248,0.12); color:#38bdf8; font-weight:600;">RAW</span>' : ''}}
               </div>

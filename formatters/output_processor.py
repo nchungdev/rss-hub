@@ -3,6 +3,7 @@ import re
 import json
 import html
 import logging
+import urllib.parse
 from datetime import datetime, timezone
 from formatters.rule_engine import run_pipeline, load_rules
 
@@ -198,10 +199,33 @@ def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: 
             dt = datetime.now(timezone.utc)
         date_str = dt.strftime("%Y-%m-%d %H:%M")
 
+        def clean_threads_redirect(u):
+            if not u:
+                return ""
+            if "l.threads.com" in u and "u=" in u:
+                try:
+                    parsed_u = urllib.parse.urlparse(u)
+                    qs = urllib.parse.parse_qs(parsed_u.query)
+                    if "u" in qs and qs["u"]:
+                        return qs["u"][0]
+                except Exception:
+                    pass
+            return u
+
         post_url = p.get("url", "")
         images = p.get("images", []) if include_images else []
-        gdrive_links = p.get("gdrive_links", [])
+        gdrive_links = [clean_threads_redirect(l) for l in p.get("gdrive_links", []) if l]
         preview_title = p.get("preview_title")
+        preview_url = clean_threads_redirect(p.get("preview_url"))
+
+        combined_text = f"{text} {p.get('content', '')} {p.get('description', '')}"
+        extra_drive = re.findall(r'https?://(?:drive|docs)\.google\.com/[^\s<>"\'\)]+', combined_text)
+        for ed in extra_drive:
+            if ed not in gdrive_links:
+                gdrive_links.append(ed)
+        if preview_url and re.match(r'https?://(?:drive|docs)\.google\.com/[^\s<>"\'\)]+', preview_url):
+            if preview_url not in gdrive_links:
+                gdrive_links.append(preview_url)
 
         first_line = text.split("\n")[0].strip() if text else "Bài viết mới"
         if len(first_line) > 100:
@@ -275,12 +299,35 @@ def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: 
         for glink in gdrive_links:
             if glink not in seen_attach_urls:
                 seen_attach_urls.add(glink)
-                label = preview_title or "Google Drive Tài liệu / Ebook"
+                is_sheet = "spreadsheets" in glink
+                is_doc = "document" in glink
+                default_title = "Google Sheets (Kho Ebook)" if is_sheet else ("Google Docs Tài liệu" if is_doc else "Google Drive Ebook / Tài liệu")
+                label = preview_title or default_title
                 attachments.append({
                     "type": "gdrive",
                     "title": label,
                     "url": glink,
-                    "ext": "gdrive"
+                    "ext": "gsheet" if is_sheet else ("gdoc" if is_doc else "gdrive")
+                })
+
+        cloud_pattern = r'https?://(?:www\.)?(?:mega\.nz|mediafire\.com|fshare\.vn|dropbox\.com|1drv\.ms|onedrive\.live\.com)/[^\s<>"\'\)]+'
+        found_cloud = re.findall(cloud_pattern, combined_text, re.IGNORECASE)
+        if preview_url and re.match(cloud_pattern, preview_url, re.IGNORECASE):
+            found_cloud.append(preview_url)
+        for clink in found_cloud:
+            if clink not in seen_attach_urls:
+                seen_attach_urls.add(clink)
+                domain = "Cloud Storage"
+                if "mega.nz" in clink: domain = "Mega.nz"
+                elif "fshare.vn" in clink: domain = "Fshare.vn"
+                elif "mediafire.com" in clink: domain = "Mediafire"
+                elif "dropbox.com" in clink: domain = "Dropbox"
+                elif "onedrive" in clink or "1drv.ms" in clink: domain = "OneDrive"
+                attachments.append({
+                    "type": "cloud",
+                    "title": preview_title or f"Tài liệu từ {domain}",
+                    "url": clink,
+                    "ext": "cloud"
                 })
 
         extracted_links = p.get("_extracted_links", [])
