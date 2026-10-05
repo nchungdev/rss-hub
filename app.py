@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 import logging
 from typing import Optional
@@ -33,18 +34,45 @@ app = FastAPI(title="ClaraOS RSS Hub", description="Unified Multi-source RSS/JSO
 RSSHUB_UPSTREAM = os.getenv("RSSHUB_UPSTREAM", "http://127.0.0.1:1200")
 BASE_URL = os.getenv("BASE_URL", "https://rss.data1box.win")
 CLARAOS_URL = os.getenv("CLARAOS_URL", "https://data1box.win")
-SCRAPE_INTERVAL_MINUTES = int(os.getenv("SCRAPE_INTERVAL_MINUTES", "30"))
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+
+def load_settings() -> dict:
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "scrape_interval_minutes": int(os.getenv("SCRAPE_INTERVAL_MINUTES", "30"))
+    }
+
+def save_settings(settings: dict):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
 
 async def background_scheduler():
+    await asyncio.sleep(5)
     while True:
         try:
+            settings = load_settings()
+            global_interval = int(settings.get("scrape_interval_minutes", 30))
+            now = datetime.now(timezone.utc).timestamp()
             feeds = load_feeds()
-            logger.info(f"Running periodic scrape for {len(feeds)} feeds...")
+            
             for slug, meta in feeds.items():
-                await asyncio.to_thread(get_feed_posts, slug, True)
+                feed_interval = int(meta.get("interval_minutes") or 0) or global_interval
+                last_scraped = float(meta.get("last_scraped_at") or 0)
+                if now - last_scraped >= feed_interval * 60:
+                    logger.info(f"Triggering scheduled scrape for feed [{slug}] (interval: {feed_interval}m)...")
+                    await asyncio.to_thread(get_feed_posts, slug, True)
+                    meta["last_scraped_at"] = now
+                    feeds[slug] = meta
+                    save_feeds(feeds)
         except Exception as e:
             logger.error(f"Scheduler error: {e}")
-        await asyncio.sleep(SCRAPE_INTERVAL_MINUTES * 60)
+        await asyncio.sleep(60)
 
 @app.on_event("startup")
 async def startup_event():
@@ -183,6 +211,8 @@ async def api_create_or_update_feed(request: Request):
         "use_flaresolverr": use_flaresolverr,
         "selectors": selectors,
         "custom_output": custom_output,
+        "interval_minutes": int(data.get("interval_minutes", 0) or 0),
+        "last_scraped_at": feeds.get(slug, {}).get("last_scraped_at") or (feeds.get(original_slug, {}).get("last_scraped_at") if original_slug else 0) or 0,
         "created_at": created_at,
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
@@ -216,6 +246,24 @@ def api_delete_feed(slug: str):
         return {"status": "ok", "slug": clean_slug}
     raise HTTPException(status_code=404, detail="Kênh feed không tồn tại")
 
+@app.get("/api/settings")
+def api_get_settings():
+    return load_settings()
+
+@app.post("/api/settings")
+async def api_update_settings(request: Request):
+    data = await request.json()
+    try:
+        val = int(data.get("scrape_interval_minutes", 30))
+    except (ValueError, TypeError):
+        val = 30
+    if val < 1 or val > 1440:
+        raise HTTPException(status_code=400, detail="Tần suất phải từ 1 đến 1440 phút")
+    settings = load_settings()
+    settings["scrape_interval_minutes"] = val
+    save_settings(settings)
+    return {"status": "ok", "settings": settings}
+
 @app.get("/api/refresh/{tag}")
 async def refresh_feed(tag: str):
     clean_tag = sanitize_slug(tag.lstrip("#"))
@@ -225,6 +273,8 @@ async def refresh_feed(tag: str):
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     feeds = load_feeds()
+    settings = load_settings()
+    global_interval = int(settings.get("scrape_interval_minutes", 30))
     feed_cards = ""
     total_posts = 0
     categories = set()
@@ -266,6 +316,12 @@ async def dashboard(request: Request):
             cookie_badge = '<span class="badge" style="padding: 2px 7px; font-size: 0.65rem; background:rgba(245, 158, 11, 0.12); color:#fbbf24; border-color:rgba(245, 158, 11, 0.3);" title="Dùng Cookie riêng biệt của scraper này"><span class="dot" style="background:#f59e0b;"></span> Custom Cookie</span>'
         else:
             cookie_badge = '<span class="badge" style="padding: 2px 7px; font-size: 0.65rem; opacity:0.65;" title="Chế độ Guest / Không dùng cookie">Guest</span>'
+
+        # Interval Badge
+        feed_interval = int(meta.get("interval_minutes") or 0)
+        interval_badge = ""
+        if feed_interval > 0:
+            interval_badge = f'<span class="badge" style="padding: 2px 7px; font-size: 0.65rem; background:rgba(168, 85, 247, 0.12); color:#c084fc; border-color:rgba(168, 85, 247, 0.3);" title="Tần suất cào riêng của kênh này: {feed_interval} phút"><span class="dot" style="background:#a855f7;"></span> ⏱️ {feed_interval}m</span>'
 
         custom_out = meta.get("custom_output") or {}
         custom_badges = []
@@ -314,6 +370,7 @@ async def dashboard(request: Request):
                             <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 5px; background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3); text-transform: uppercase;">{cat}</span>
                             <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 5px; background: rgba(255,255,255,0.06); color: var(--text-dim); border: 1px solid var(--card-border);">{type_badge}</span>
                             {cookie_badge}
+                            {interval_badge}
                             {custom_badges_html}
                         </div>
                         <div style="display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 0.73rem; color: var(--text-dim); flex-wrap: wrap;">
@@ -1107,6 +1164,44 @@ async def dashboard(request: Request):
         width: calc(100% - 24px);
         max-width: 100%;
       }}
+      .preset-interval-btn {{
+        padding: 9px 12px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        border-radius: 8px;
+        border: 1px solid var(--card-border);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 0.15s ease;
+        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }}
+      .preset-interval-btn:hover {{
+        border-color: #38bdf8;
+        color: #fff;
+        background: rgba(14, 165, 233, 0.12);
+      }}
+      .stat-card.clickable {{
+        cursor: pointer;
+        transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+      }}
+      .stat-card.clickable:hover {{
+        transform: translateY(-2px);
+        border-color: rgba(168, 85, 247, 0.5);
+        box-shadow: 0 8px 24px rgba(168, 85, 247, 0.15);
+      }}
+      .footer-stat-chip.clickable {{
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }}
+      .footer-stat-chip.clickable:hover {{
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(245, 158, 11, 0.35);
+        filter: brightness(1.15);
+      }}
     }}
   </style>
 </head>
@@ -1147,6 +1242,10 @@ async def dashboard(request: Request):
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-1.5 1.5L14 9l-1.5-1.5L11 9l-1.5-1.5L8 9l-1.5-1.5-4 4a5 5 0 0 0 7 7l4-4 1.5 1.5L16 15l1.5-1.5L19 15l1.5-1.5 2-2"/></svg>
         <span>Kho Cookie Vault</span>
       </button>
+      <button class="nav-item" onclick="openIntervalModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span>Tần suất cào</span>
+      </button>
       <button class="nav-item" onclick="refreshAllFeeds()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
         <span>Cào mới tất cả</span>
@@ -1175,6 +1274,10 @@ async def dashboard(request: Request):
       </div>
 
       <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
+        <button class="btn" onclick="openIntervalModal()" title="Cài đặt tần suất cào tự động ({global_interval}m)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>Tần suất ({global_interval}m)</span>
+        </button>
         <button class="btn" onclick="openCookieVaultModal()" title="Quản lý Kho Cookie theo Trang web &amp; Scraper">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px; height:15px;"><path d="M21 2l-2 2m-1.5 1.5L14 9l-1.5-1.5L11 9l-1.5-1.5L8 9l-1.5-1.5-4 4a5 5 0 0 0 7 7l4-4 1.5 1.5L16 15l1.5-1.5L19 15l1.5-1.5 2-2"/></svg>
           <span>Kho Cookie</span>
@@ -1215,14 +1318,17 @@ async def dashboard(request: Request):
           </div>
         </div>
 
-        <div class="stat-card">
+        <div class="stat-card clickable" onclick="openIntervalModal()" title="Bấm để cấu hình chu kỳ quét tự động">
           <div class="stat-card-icon stat-violet">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           </div>
           <div class="stat-info">
-            <div class="label">Chu kỳ quét</div>
-            <div class="val">{SCRAPE_INTERVAL_MINUTES} Phút</div>
-            <div class="desc">Background Daemon</div>
+            <div class="label" style="display: flex; align-items: center; justify-content: space-between;">
+              <span>Chu kỳ quét</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px; opacity: 0.7;"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            </div>
+            <div class="val">{global_interval} Phút</div>
+            <div class="desc">Bấm để chỉnh tần suất</div>
           </div>
         </div>
 
@@ -1272,9 +1378,10 @@ async def dashboard(request: Request):
           <span class="chip-label">Bài viết:</span>
           <span class="chip-val">{total_posts}</span>
         </div>
-        <div class="footer-stat-chip chip-amber">
+        <div class="footer-stat-chip chip-amber clickable" onclick="openIntervalModal()" title="Bấm để chỉnh tần suất quét tự động">
           <span class="chip-label">Tần suất:</span>
-          <span class="chip-val">{SCRAPE_INTERVAL_MINUTES}m</span>
+          <span class="chip-val">{global_interval}m</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 11px; height: 11px; opacity: 0.8; margin-left: 2px;"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
         </div>
         <div class="footer-stat-chip chip-violet">
           <span class="chip-label">Gateway:</span>
@@ -1369,6 +1476,24 @@ async def dashboard(request: Request):
         <div class="form-group">
           <label class="form-label">Mô tả ngắn</label>
           <textarea id="feedDesc" class="form-textarea" rows="2" placeholder="Mô tả nội dung kênh feed này..."></textarea>
+        </div>
+
+        <!-- 3.1 TẦN SUẤT CÀO DỮ LIỆU RIÊNG CHO KÊNH -->
+        <div class="form-group">
+          <label class="form-label">Tần suất cào dữ liệu cho kênh này</label>
+          <select id="feedInterval" class="form-select" style="font-size: 0.85rem;">
+            <option value="0">Dùng tần suất mặc định hệ thống ({global_interval} phút)</option>
+            <option value="5">⚡ Rất nhanh: 5 phút / lần</option>
+            <option value="10">⚡ Nhanh: 10 phút / lần</option>
+            <option value="15">Nhanh: 15 phút / lần</option>
+            <option value="30">Tiêu chuẩn: 30 phút / lần</option>
+            <option value="60">1 giờ / lần (60 phút)</option>
+            <option value="120">2 giờ / lần (120 phút)</option>
+            <option value="360">6 giờ / lần (360 phút)</option>
+            <option value="720">12 giờ / lần (720 phút)</option>
+            <option value="1440">24 giờ / lần (1 ngày)</option>
+          </select>
+          <div class="form-hint">Chu kỳ chạy nền cào bài viết mới cho riêng kênh này. Chọn 0 để kế thừa chu kỳ toàn cục ({global_interval}m).</div>
         </div>
 
         <!-- 4. CẤU HÌNH COOKIE XÁC THỰC CHO SCRAPER -->
@@ -1553,6 +1678,57 @@ async def dashboard(request: Request):
     </div>
   </div>
 
+  <!-- MODAL: SCRAPE INTERVAL CONFIGURATION -->
+  <div id="modalInterval" class="modal-overlay" onclick="handleModalClick(event, 'modalInterval')">
+    <div class="modal-card" style="width: min(520px, 100%);">
+      <div class="modal-head">
+        <div>
+          <h2 class="modal-title">Cấu hình Tần suất Quét Nền (Scrape Interval)</h2>
+          <div style="font-size:0.75rem; color:var(--text-dim); margin-top:2px;">Thiết lập chu kỳ định kỳ hệ thống tự động cào bài viết mới cho các kênh feed.</div>
+        </div>
+        <button class="modal-close" onclick="closeModal('modalInterval')">✕</button>
+      </div>
+
+      <form onsubmit="handleSaveInterval(event)">
+        <div style="margin-bottom: 16px;">
+          <label class="form-label">Chọn nhanh chu kỳ phổ biến:</label>
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px;">
+            <button type="button" class="preset-interval-btn" onclick="selectPresetInterval(5)" id="btnPreset5">⚡ 5 Phút</button>
+            <button type="button" class="preset-interval-btn" onclick="selectPresetInterval(10)" id="btnPreset10">⚡ 10 Phút</button>
+            <button type="button" class="preset-interval-btn" onclick="selectPresetInterval(15)" id="btnPreset15">15 Phút</button>
+            <button type="button" class="preset-interval-btn" onclick="selectPresetInterval(30)" id="btnPreset30">30 Phút</button>
+            <button type="button" class="preset-interval-btn" onclick="selectPresetInterval(60)" id="btnPreset60">1 Giờ (60m)</button>
+            <button type="button" class="preset-interval-btn" onclick="selectPresetInterval(120)" id="btnPreset120">2 Giờ (120m)</button>
+            <button type="button" class="preset-interval-btn" onclick="selectPresetInterval(360)" id="btnPreset360">6 Giờ (360m)</button>
+            <button type="button" class="preset-interval-btn" onclick="selectPresetInterval(720)" id="btnPreset720">12 Giờ</button>
+            <button type="button" class="preset-interval-btn" onclick="selectPresetInterval(1440)" id="btnPreset1440">24 Giờ (1 ngày)</button>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label class="form-label">Hoặc nhập số phút tùy chỉnh (1 - 1440 phút):</label>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <input type="number" id="inputGlobalInterval" class="form-input" min="1" max="1440" required value="{global_interval}" style="font-weight: 700; font-size: 1rem; width: 140px;" oninput="updatePresetHighlight(this.value)">
+            <span style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600;">phút / lần quét</span>
+          </div>
+          <div class="form-hint" style="margin-top: 6px;">Hệ thống chạy background daemon kiểm tra và cào mới các kênh feed mỗi khi hết chu kỳ này.</div>
+        </div>
+
+        <div style="background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.2); border-radius: 10px; padding: 10px 12px; margin-bottom: 16px; font-size: 0.75rem; color: #94a3b8; line-height: 1.45;">
+          💡 <strong>Mẹo:</strong> Bạn cũng có thể đặt tần suất cào riêng cho từng kênh cụ thể khi <em>Sửa cấu hình</em> hoặc <em>Thêm kênh mới</em>.
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; padding-top:14px; border-top:1px solid var(--card-border);">
+          <button type="button" class="btn" onclick="closeModal('modalInterval')">Hủy bỏ</button>
+          <button type="submit" id="btnSaveInterval" class="btn primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px;"><polyline points="20 6 9 17 4 12"/></svg>
+            <span>Lưu tần suất</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Toast Notification -->
   <div id="toast" class="toast">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px; color: #34d399;"><polyline points="20 6 9 17 4 12"/></svg>
@@ -1678,6 +1854,7 @@ async def dashboard(request: Request):
       if (document.getElementById('outIncludeEnclosures')) document.getElementById('outIncludeEnclosures').checked = true;
       if (document.getElementById('outFilterInclude')) document.getElementById('outFilterInclude').value = '';
       if (document.getElementById('outFilterExclude')) document.getElementById('outFilterExclude').value = '';
+      if (document.getElementById('feedInterval')) document.getElementById('feedInterval').value = '0';
 
       const title = document.getElementById('modalAddTitle');
       if (title) title.innerText = 'Tạo Kênh RSS Mới (Universal Feed Generator)';
@@ -1767,6 +1944,7 @@ async def dashboard(request: Request):
           if (document.getElementById('outIncludeEnclosures')) document.getElementById('outIncludeEnclosures').checked = cOut.include_enclosures !== false;
           if (document.getElementById('outFilterInclude')) document.getElementById('outFilterInclude').value = cOut.filter_include || '';
           if (document.getElementById('outFilterExclude')) document.getElementById('outFilterExclude').value = cOut.filter_exclude || '';
+          if (document.getElementById('feedInterval')) document.getElementById('feedInterval').value = String(f.interval_minutes || 0);
 
           const title = document.getElementById('modalAddTitle');
           if (title) title.innerText = 'Chỉnh sửa Cấu hình Kênh: ' + (f.title || f.slug);
@@ -2089,7 +2267,8 @@ async def dashboard(request: Request):
         vault_website: document.getElementById('vaultWebsite').value.trim(),
         use_flaresolverr: document.getElementById('chkUseFlareSolverr') ? document.getElementById('chkUseFlareSolverr').checked : false,
         selectors: selectors,
-        custom_output: customOutput
+        custom_output: customOutput,
+        interval_minutes: parseInt(document.getElementById('feedInterval') ? document.getElementById('feedInterval').value : 0) || 0
       }};
 
       fetch('/api/feeds', {{
@@ -2111,6 +2290,76 @@ async def dashboard(request: Request):
         showToast('Lỗi: ' + err, true);
         btn.disabled = false;
         btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px; height:15px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span id="btnSubmitFeedText">' + (originalSlug ? 'Cập nhật Cấu hình' : 'Lưu &amp; Kích hoạt Feed') + '</span>';
+      }});
+    }}
+
+    function openIntervalModal() {{
+      fetch('/api/settings')
+        .then(r => r.json())
+        .then(data => {{
+          const val = data.scrape_interval_minutes || 30;
+          const inp = document.getElementById('inputGlobalInterval');
+          if (inp) inp.value = val;
+          updatePresetHighlight(val);
+          openModal('modalInterval');
+        }})
+        .catch(err => {{
+          openModal('modalInterval');
+        }});
+    }}
+
+    function selectPresetInterval(val) {{
+      const inp = document.getElementById('inputGlobalInterval');
+      if (inp) {{
+        inp.value = val;
+        updatePresetHighlight(val);
+      }}
+    }}
+
+    function updatePresetHighlight(val) {{
+      val = parseInt(val);
+      document.querySelectorAll('.preset-interval-btn').forEach(b => {{
+        b.style.borderColor = 'var(--card-border)';
+        b.style.background = 'rgba(255, 255, 255, 0.04)';
+        b.style.color = 'var(--text-muted)';
+      }});
+      const activeBtn = document.getElementById('btnPreset' + val);
+      if (activeBtn) {{
+        activeBtn.style.borderColor = 'var(--primary)';
+        activeBtn.style.background = 'rgba(14, 165, 233, 0.2)';
+        activeBtn.style.color = '#38bdf8';
+      }}
+    }}
+
+    function handleSaveInterval(e) {{
+      e.preventDefault();
+      const val = parseInt(document.getElementById('inputGlobalInterval').value);
+      if (!val || val < 1 || val > 1440) {{
+        showToast('Tần suất phải từ 1 đến 1440 phút (24h)', true);
+        return;
+      }}
+      const btn = document.getElementById('btnSaveInterval');
+      btn.disabled = true;
+      btn.innerText = 'Đang lưu...';
+
+      fetch('/api/settings', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ scrape_interval_minutes: val }})
+      }})
+      .then(r => {{
+        if (!r.ok) return r.json().then(e => Promise.reject(e.detail || 'Lỗi server'));
+        return r.json();
+      }})
+      .then(d => {{
+        showToast('Đã lưu tần suất quét mới: ' + val + ' phút!');
+        closeModal('modalInterval');
+        setTimeout(() => location.reload(), 800);
+      }})
+      .catch(err => {{
+        showToast('Lỗi: ' + err, true);
+        btn.disabled = false;
+        btn.innerText = 'Lưu tần suất';
       }});
     }}
 
