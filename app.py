@@ -529,6 +529,8 @@ async def dashboard(request: Request):
     global_interval = int(settings.get("scrape_interval_minutes", 30))
     feed_cards = ""
     total_posts = 0
+    total_raw_posts = 0
+    total_output_posts = 0
     categories = set()
 
     for slug, meta in feeds.items():
@@ -592,6 +594,8 @@ async def dashboard(request: Request):
         out_posts = out_data.get("posts", [])
         out_count = len(out_posts)
         filtered_count = max(0, count - out_count)
+        total_raw_posts += count
+        total_output_posts += out_count
 
         # Recent items preview (sleek single row per article from task output)
         preview_items_html = ""
@@ -735,11 +739,10 @@ async def dashboard(request: Request):
         out_count = len(out_data.get("posts", [])) if out_data else p_count
         filtered_count = max(0, p_count - out_count)
 
-        # Status badge
+        # Status
         if last_scraped == 0 and p_count == 0:
-            status_badge = '<span class="badge" style="background:rgba(255,255,255,0.06); color:var(--text-muted);"><span class="dot"></span> Chưa cào</span>'
-            time_ago = "Chưa cào"
-            next_due = "Sẵn sàng"
+            status_html = '<div style="font-weight:600; font-size:0.78rem; color:var(--text-dim); display:flex; align-items:center; gap:5px;"><span class="dot" style="background:#64748b;"></span> Chưa cào</div>'
+            sub_status = '<div style="font-size:0.68rem; color:var(--text-dim); margin-top:2px;">Sẵn sàng cào</div>'
         else:
             diff = max(0, int(now - last_scraped))
             if diff < 60: time_ago = "Vừa xong"
@@ -747,98 +750,84 @@ async def dashboard(request: Request):
             elif diff < 86400: time_ago = f"{diff // 3600}h trước"
             else: time_ago = f"{diff // 86400}d trước"
 
-            due_in = int(last_scraped + interval * 60 - now)
-            if due_in <= 0:
-                next_due = '<span style="color:#f59e0b; font-weight:600;">Đến hạn cào</span>'
-            elif due_in < 60:
-                next_due = "Còn <1m"
-            else:
-                next_due = f"Còn ~{due_in // 60}m"
-
             if p_count > 0:
-                filter_sub = f' <span style="color:#fbbf24; font-size:0.65rem;" title="Đã lọc loại bỏ {filtered_count} bài rác/spam qua Rules">(Lọc -{filtered_count})</span>' if filtered_count > 0 else ""
-                status_badge = f'<span class="badge green" style="font-weight:600;"><span class="dot" style="background:#10b981;"></span> Output: {out_count}/{p_count} bài{filter_sub}</span>'
+                filter_sub = f' <span style="color:#fbbf24; font-size:0.68rem; font-weight:700;" title="Đã lọc loại bỏ {filtered_count} bài">(-{filtered_count})</span>' if filtered_count > 0 else ""
+                status_html = f'<div style="font-weight:600; font-size:0.78rem; color:#10b981; display:flex; align-items:center; gap:5px;"><span class="dot" style="background:#10b981;"></span> {out_count}/{p_count} bài{filter_sub}</div>'
             else:
-                status_badge = '<span class="badge yellow" style="font-weight:600;"><span class="dot" style="background:#f59e0b;"></span> Trống (0 bài)</span>'
+                status_html = '<div style="font-weight:600; font-size:0.78rem; color:#f59e0b; display:flex; align-items:center; gap:5px;"><span class="dot" style="background:#f59e0b;"></span> 0 bài</div>'
+            
+            sub_status = f'<div style="font-size:0.68rem; color:var(--text-dim); margin-top:2px;">Cào {time_ago} • <button type="button" onclick="openFeedIntervalModal(\'{slug}\', \'{safe_title}\', {interval})" style="background:none; border:none; padding:0; color:#c084fc; cursor:pointer; text-decoration:underline;" title="Bấm để sửa chu kỳ">⏱️ {interval}m</button></div>'
 
+        # Engine label
         if feed_type == "web":
-            eng_badge = '<span class="badge blue" style="font-size:0.68rem;">🌐 Web Scraper</span>'
+            eng_label = '<span style="color:#38bdf8; font-size:0.72rem; display:inline-flex; align-items:center; gap:4px; font-weight:600;">🌐 Web</span>'
         elif feed_type == "threads":
-            eng_badge = '<span class="badge purple" style="background:rgba(168,85,247,0.15); color:#c084fc; font-size:0.68rem;">🧵 Threads</span>'
+            eng_label = '<span style="color:#c084fc; font-size:0.72rem; display:inline-flex; align-items:center; gap:4px; font-weight:600;">🧵 Threads</span>'
         elif feed_type == "rsshub":
-            eng_badge = '<span class="badge cyan" style="font-size:0.68rem;">🚀 RSSHub</span>'
+            eng_label = '<span style="color:#22d3ee; font-size:0.72rem; display:inline-flex; align-items:center; gap:4px; font-weight:600;">🚀 RSSHub</span>'
         else:
-            eng_badge = '<span class="badge amber" style="font-size:0.68rem;">📡 External RSS</span>'
+            eng_label = '<span style="color:#fbbf24; font-size:0.72rem; display:inline-flex; align-items:center; gap:4px; font-weight:600;">📡 RSS</span>'
 
+        # Profile label
         c_mode = meta.get("cookie_mode", "none")
         c_prof = meta.get("cookie_profile", "")
         if c_mode == "profile" and c_prof:
-            prof_obj = next((p for p in profiles if p["id"] == c_prof), None)
-            dom_txt = prof_obj.get("domain", "") if prof_obj else ""
-            label_txt = f"[{dom_txt}] {c_prof}" if dom_txt else c_prof
-            auth_badge = f'<span class="badge" style="background:rgba(14,165,233,0.12); color:#38bdf8; font-size:0.68rem;" title="Profile: {c_prof}">📂 {label_txt}</span>'
+            prof_label = f'<span style="font-size:0.68rem; color:#38bdf8; font-family:var(--mono);" title="Profile: {c_prof}">📂 {c_prof}</span>'
         elif c_mode == "custom":
-            auth_badge = '<span class="badge" style="background:rgba(245,158,11,0.12); color:#fbbf24; font-size:0.68rem;">✏️ Custom Cookie</span>'
+            prof_label = '<span style="font-size:0.68rem; color:#fbbf24;">Custom Cookie</span>'
         else:
-            auth_badge = '<span class="badge" style="background:rgba(255,255,255,0.05); color:var(--text-dim); font-size:0.68rem;">Guest</span>'
+            prof_label = '<span style="font-size:0.68rem; color:var(--text-dim);">Guest</span>'
 
         safe_title = title.replace("'", "\\'").replace('"', '&quot;')
-        truncated_target = target if len(target) <= 45 else target[:42] + "..."
+        truncated_target = target if len(target) <= 42 else target[:39] + "..."
 
         dashboard_table_rows += f"""
         <tr class="dashboard-row" data-slug="{slug}" data-category="{cat}">
-            <td>
-                <div style="font-weight: 700; color: #fff; font-size: 0.84rem; display: flex; align-items: center; gap: 6px;">
-                    <span>{title}</span>
-                    <span class="badge gray" style="font-size: 0.65rem;">{cat}</span>
+            <td style="vertical-align: middle;">
+                <div style="font-weight: 600; color: #f8fafc; font-size: 0.86rem; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                    <a href="javascript:void(0)" onclick="viewFeedPostsOnDashboard('{slug}')" style="color: #f8fafc; text-decoration: none;" title="Xem các bài viết của kênh này dưới Dashboard">{title}</a>
+                    <span class="badge gray" style="font-size: 0.62rem; padding: 1px 6px;">{cat}</span>
                 </div>
-                <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
-                    <span style="font-family: var(--mono); font-size: 0.7rem; color: var(--text-dim);">/{slug}</span>
-                    <div style="display: inline-flex; gap: 4px;">
-                        <a href="{BASE_URL}/{slug}.xml" target="_blank" class="format-btn xml" style="height: 20px; padding: 0 6px; font-size: 0.65rem;">XML</a>
-                        <a href="{BASE_URL}/{slug}.json" target="_blank" class="format-btn json" style="height: 20px; padding: 0 6px; font-size: 0.65rem;">JSON</a>
-                        <a href="{BASE_URL}/{slug}.atom" target="_blank" class="format-btn atom" style="height: 20px; padding: 0 6px; font-size: 0.65rem;">ATOM</a>
-                    </div>
-                </div>
-            </td>
-            <td>
-                <div>{eng_badge}</div>
-                <div style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--mono); margin-top: 4px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{target}">
-                    {truncated_target}
-                </div>
-            </td>
-            <td>
-                <div>{status_badge}</div>
-                <div style="font-size: 0.68rem; color: var(--text-dim); margin-top: 3px;">
-                    Lần cào: <strong style="color: var(--text-muted);">{time_ago}</strong>
+                <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 0.7rem; color: var(--text-dim); flex-wrap: wrap;">
+                    <span style="font-family: var(--mono); color: var(--text-muted);">/{slug}</span>
+                    <span>•</span>
+                    <span style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{target}">{truncated_target}</span>
+                    <span>•</span>
+                    <span style="display: inline-flex; gap: 4px;">
+                        <a href="{BASE_URL}/{slug}.xml" target="_blank" style="color: #f59e0b; text-decoration: none; font-size: 0.65rem; font-family: var(--mono); font-weight:600;">XML</a>
+                        <span style="color: rgba(255,255,255,0.2);">|</span>
+                        <a href="{BASE_URL}/{slug}.json" target="_blank" style="color: #38bdf8; text-decoration: none; font-size: 0.65rem; font-family: var(--mono); font-weight:600;">JSON</a>
+                        <span style="color: rgba(255,255,255,0.2);">|</span>
+                        <a href="{BASE_URL}/{slug}.atom" target="_blank" style="color: #a855f7; text-decoration: none; font-size: 0.65rem; font-family: var(--mono); font-weight:600;">ATOM</a>
+                    </span>
                 </div>
             </td>
-            <td>
-                <button type="button" class="badge" onclick="openFeedIntervalModal('{slug}', '{safe_title}', {interval})" style="cursor: pointer; padding: 2px 7px; font-size: 0.68rem; background: rgba(168, 85, 247, 0.14); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 5px;" title="Bấm để đổi chu kỳ cào">
-                    ⏱️ {interval}m ⚙️
-                </button>
-                <div style="font-size: 0.68rem; color: var(--text-dim); margin-top: 3px;">
-                    Kế tiếp: {next_due}
-                </div>
+            <td style="vertical-align: middle;">
+                <div>{eng_label}</div>
+                <div style="margin-top: 3px;">{prof_label}</div>
             </td>
-            <td>
-                {auth_badge}
+            <td style="vertical-align: middle;">
+                {status_html}
+                {sub_status}
             </td>
-            <td style="text-align: right;">
-                <div style="display: inline-flex; align-items: center; gap: 6px;">
-                    <button class="btn primary" onclick="refreshFeed('{slug}', this)" title="Cào mới dữ liệu ngay" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">
+            <td style="text-align: right; vertical-align: middle;">
+                <div style="display: inline-flex; align-items: center; gap: 5px; justify-content: flex-end;">
+                    <button class="btn primary" onclick="refreshFeed('{slug}', this)" title="Cào mới dữ liệu ngay" style="height: 27px; padding: 0 8px; font-size: 0.72rem;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
                         <span>Cào</span>
                     </button>
-                    <button class="btn" onclick="openCompareModal('{slug}')" id="btnDashPreview_{slug}" title="Xem và so sánh Task Output sau Rule vs RAW Data gốc" style="height: 28px; padding: 0 8px; font-size: 0.72rem; color: #38bdf8; border-color: rgba(56, 189, 248, 0.3);">
+                    <button class="btn" onclick="viewFeedPostsOnDashboard('{slug}')" title="Xem danh sách bài viết dưới Dashboard" style="height: 27px; padding: 0 8px; font-size: 0.72rem; color: #10b981; border-color: rgba(16,185,129,0.3);">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                        <span>Xem Output</span>
+                        <span>Xem</span>
                     </button>
-                    <button class="btn" onclick="reprocessFeed('{slug}', this)" title="Chạy lại Rules trên RAW data không cần cào lại web" style="height: 28px; padding: 0 8px; font-size: 0.72rem; color: #a855f7; border-color: rgba(168, 85, 247, 0.3);">
-                        <span>⚡ Rule</span>
+                    <button class="btn" onclick="openCompareModal('{slug}')" id="btnDashPreview_{slug}" title="So sánh chi tiết Task Output vs RAW Data gốc" style="height: 27px; padding: 0 7px; font-size: 0.72rem; color: #38bdf8; border-color: rgba(56, 189, 248, 0.3);">
+                        <span>So sánh</span>
                     </button>
-                    <button class="btn" onclick="editFeedModal('{slug}')" title="Cấu hình scraper này" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">
-                        <span>Cấu hình</span>
+                    <button class="btn" onclick="reprocessFeed('{slug}', this)" title="Chạy lại Rules trên RAW data không cần cào lại web" style="height: 27px; padding: 0 7px; font-size: 0.72rem; color: #a855f7; border-color: rgba(168, 85, 247, 0.3);">
+                        <span>⚡</span>
+                    </button>
+                    <button class="btn" onclick="editFeedModal('{slug}')" title="Cấu hình scraper này" style="height: 27px; padding: 0 7px; font-size: 0.72rem;">
+                        <span>⚙️</span>
                     </button>
                 </div>
             </td>
@@ -1975,50 +1964,41 @@ async def dashboard(request: Request):
       <!-- TAB 1: DASHBOARD (Table kết quả các lượt cào của các scraper đã cấu hình) -->
       <div id="view_dashboard" class="main-tab-content">
         <!-- Quick KPI Strip -->
-        <div class="kpi-strip">
+        <div class="kpi-strip" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
           <div class="kpi-box">
             <div class="kpi-icon" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><circle cx="5" cy="19" r="1.5"/><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/></svg>
             </div>
             <div class="kpi-info">
-              <div class="kpi-label">Scrapers Đang Chạy</div>
+              <div class="kpi-label">Scrapers Hoạt Động</div>
               <div class="kpi-val">{len(feeds)} Kênh</div>
             </div>
           </div>
           <div class="kpi-box">
-            <div class="kpi-icon" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+            <div class="kpi-icon" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             </div>
             <div class="kpi-info">
-              <div class="kpi-label">Bài Viết Đã Cào</div>
-              <div class="kpi-val">{total_posts} Bài</div>
+              <div class="kpi-label">Task Output Sạch</div>
+              <div class="kpi-val">{total_output_posts} Bài</div>
             </div>
           </div>
-          <div class="kpi-box clickable" onclick="openAllIntervalsModal()" style="cursor: pointer;" title="Bấm để xem và sửa lịch cào">
+          <div class="kpi-box">
+            <div class="kpi-icon" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </div>
+            <div class="kpi-info">
+              <div class="kpi-label">Dữ Liệu Scrape RAW</div>
+              <div class="kpi-val">{total_raw_posts} Bài</div>
+            </div>
+          </div>
+          <div class="kpi-box clickable" onclick="switchMainTab('rules')" style="cursor: pointer;" title="Bấm để xem kho Rule và Profile">
             <div class="kpi-icon" style="background: rgba(168, 85, 247, 0.15); color: #c084fc;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             </div>
             <div class="kpi-info">
-              <div class="kpi-label">Lịch Cào Ngầm ⚙️</div>
-              <div class="kpi-val">Độc lập từng kênh</div>
-            </div>
-          </div>
-          <div class="kpi-box clickable" onclick="switchMainTab('profiles')" style="cursor: pointer;" title="Bấm để chuyển sang Quản lý Profile">
-            <div class="kpi-icon" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            </div>
-            <div class="kpi-info">
-              <div class="kpi-label">Kho Profile 🌐</div>
-              <div class="kpi-val">{len(profiles)} Profiles</div>
-            </div>
-          </div>
-          <div class="kpi-box clickable" onclick="switchMainTab('rules')" style="cursor: pointer;" title="Bấm để chuyển sang Quản lý Rule Output">
-            <div class="kpi-icon" style="background: rgba(6, 182, 212, 0.15); color: #22d3ee;">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            </div>
-            <div class="kpi-info">
-              <div class="kpi-label">Kho Rule Output ⚡</div>
-              <div class="kpi-val">{len(rules_list)} Rules</div>
+              <div class="kpi-label">Kho Rule &amp; Profile</div>
+              <div class="kpi-val">{len(rules_list)} Rules • {len(profiles)} Profiles</div>
             </div>
           </div>
         </div>
@@ -2043,23 +2023,21 @@ async def dashboard(request: Request):
             <table class="data-table" id="dashboardTable">
               <thead>
                 <tr>
-                  <th>Scraper / Kênh</th>
-                  <th>Loại Engine &amp; Mục tiêu</th>
-                  <th>Trạng thái cào</th>
-                  <th>Tần suất</th>
-                  <th>Profile áp dụng</th>
-                  <th style="text-align: right;">Thao tác</th>
+                  <th style="width: 40%;">Scraper &amp; Mục tiêu</th>
+                  <th style="width: 18%;">Engine &amp; Profile</th>
+                  <th style="width: 22%;">Trạng thái &amp; Tần suất</th>
+                  <th style="width: 20%; text-align: right;">Thao tác</th>
                 </tr>
               </thead>
               <tbody>
-                {dashboard_table_rows if dashboard_table_rows else '<tr><td colspan="6" style="text-align:center; padding:32px; color:var(--text-dim);">Chưa có Scraper nào được cấu hình.</td></tr>'}
+                {dashboard_table_rows if dashboard_table_rows else '<tr><td colspan="4" style="text-align:center; padding:32px; color:var(--text-dim);">Chưa có Scraper nào được cấu hình.</td></tr>'}
               </tbody>
             </table>
           </div>
         </div>
 
         <!-- DASHBOARD POSTS EXPLORER: TASK OUTPUT & SCRAPED LIST -->
-        <div class="dashboard-explorer-section" style="margin-top: 24px;">
+        <div id="dashboardExplorer" class="dashboard-explorer-section" style="margin-top: 24px;">
           <!-- Explorer Header & Action Toolbar -->
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; flex-wrap: wrap;">
             <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
@@ -3335,6 +3313,14 @@ async def dashboard(request: Request):
       const sel = document.getElementById('dashFeedFilter');
       if (sel && sel.value !== val) sel.value = val;
       renderDashboardPostsLists();
+    }}
+
+    function viewFeedPostsOnDashboard(slug) {{
+      onDashFeedFilterChange(slug);
+      const explorer = document.getElementById('dashboardExplorer');
+      if (explorer) {{
+        explorer.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+      }}
     }}
 
     function onDashPostSearch(val) {{
