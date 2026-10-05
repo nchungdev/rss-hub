@@ -1,9 +1,11 @@
 import html
 from datetime import datetime, timezone
+from formatters.rule_engine import run_pipeline
 
 def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: dict = None) -> list:
     """
-    Applies custom output configurations and query parameters to posts:
+    Applies custom output configurations, rules, and query parameters to posts:
+    - Rule Engine Pipeline (replace, conditional filter, format/clean, extract links)
     - Keyword filtering (include / exclude)
     - Output post limit
     - Title templating ({title}, {author}, {category}, {date})
@@ -12,6 +14,15 @@ def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: 
     feed_meta = feed_meta or {}
     query_params = query_params or {}
     custom_cfg = feed_meta.get("custom_output") or {}
+
+    # 0. Apply Output Rule Pipeline (Global Rules + Custom Rules)
+    applied_rules = feed_meta.get("applied_rules") or []
+    custom_rules = feed_meta.get("custom_rules") or []
+    if "rules" in query_params:
+        applied_rules = [r.strip() for r in query_params["rules"].split(",") if r.strip()]
+    
+    if applied_rules or custom_rules:
+        posts = run_pipeline(posts, rule_ids=applied_rules, custom_rules=custom_rules, feed_meta=feed_meta)
 
     # 1. Resolve parameters (URL Query Params override feed_meta configuration)
     raw_limit = query_params.get("limit") or custom_cfg.get("limit") or 0

@@ -1,5 +1,6 @@
 import os
 import json
+import html
 import asyncio
 import logging
 from typing import Optional
@@ -27,6 +28,15 @@ from scrapers.cookie_vault import (
 from formatters.rss import generate_rss_xml
 from formatters.json_feed import generate_json_feed
 from formatters.atom import generate_atom_xml
+from formatters.rule_engine import (
+    load_rules,
+    save_rules,
+    get_rule_by_id,
+    save_rule,
+    delete_rule,
+    get_rules_summary,
+    run_pipeline
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("rsshub.wrapper")
@@ -161,6 +171,35 @@ async def api_create_or_update_cookie(request: Request):
 def api_delete_cookie(profile_id: str):
     return api_delete_profile(profile_id)
 
+# ==========================================
+# OUTPUT RULE ENGINE API ENDPOINTS
+# ==========================================
+
+@app.get("/api/rules")
+def api_get_rules():
+    feeds = load_feeds()
+    return get_rules_summary(feeds)
+
+@app.get("/api/rules/{rule_id}")
+def api_get_rule_detail(rule_id: str):
+    r = get_rule_by_id(rule_id)
+    if r:
+        return r
+    raise HTTPException(status_code=404, detail="Không tìm thấy rule này")
+
+@app.post("/api/rules")
+async def api_create_or_update_rule(request: Request):
+    data = await request.json()
+    rule_id = save_rule(data)
+    return {"status": "ok", "id": rule_id}
+
+@app.delete("/api/rules/{rule_id}")
+def api_delete_rule(rule_id: str):
+    success = delete_rule(rule_id)
+    if success:
+        return {"status": "ok", "id": rule_id}
+    raise HTTPException(status_code=404, detail="Không tìm thấy rule này")
+
 @app.get("/api/feeds")
 def api_get_feeds():
     return load_feeds()
@@ -243,6 +282,8 @@ async def api_create_or_update_feed(request: Request):
         "use_flaresolverr": use_flaresolverr,
         "selectors": selectors,
         "custom_output": custom_output,
+        "applied_rules": data.get("applied_rules") or [],
+        "custom_rules": data.get("custom_rules") or [],
         "interval_minutes": int(data.get("interval_minutes", 30) or 30),
         "last_scraped_at": feeds.get(slug, {}).get("last_scraped_at") or (feeds.get(original_slug, {}).get("last_scraped_at") if original_slug else 0) or 0,
         "created_at": created_at,
@@ -713,6 +754,117 @@ async def dashboard(request: Request):
                     </div>
                 """
             profiles_html += '</div></div>'
+
+    # Rules calculation
+    rules_list = get_rules_summary(feeds)
+
+    count_replace = sum(1 for r in rules_list if r.get("rule_type") == "replace")
+    count_filter = sum(1 for r in rules_list if r.get("rule_type") == "filter")
+    count_format = sum(1 for r in rules_list if r.get("rule_type") == "format")
+    count_extract = sum(1 for r in rules_list if r.get("rule_type") == "extract_links")
+
+    rule_pills = f'<button class="pill active" onclick="filterRules(\'all\', this)"><span>Tất cả Rule</span><span class="pill-count">{len(rules_list)}</span></button>'
+    rule_pills += f'<button class="pill" onclick="filterRules(\'replace\', this)"><span>🔄 Thay thế</span><span class="pill-count">{count_replace}</span></button>'
+    rule_pills += f'<button class="pill" onclick="filterRules(\'filter\', this)"><span>⛔ Lọc bài</span><span class="pill-count">{count_filter}</span></button>'
+    rule_pills += f'<button class="pill" onclick="filterRules(\'format\', this)"><span>✨ Làm sạch</span><span class="pill-count">{count_format}</span></button>'
+    rule_pills += f'<button class="pill" onclick="filterRules(\'extract_links\', this)"><span>🔗 Bóc link</span><span class="pill-count">{count_extract}</span></button>'
+
+    rules_html = ""
+    if not rules_list:
+        rules_html = '''<div style="text-align: center; padding: 48px 20px; background: var(--card-bg); border: 1px dashed var(--card-border); border-radius: 16px;">
+            <div style="font-size: 2.2rem; margin-bottom: 10px;">⚡</div>
+            <div style="font-weight: 700; font-size: 1rem; color: #fff; margin-bottom: 6px;">Chưa có Rule xử lý output nào</div>
+            <div style="font-size: 0.78rem; color: var(--text-dim); max-width: 440px; margin: 0 auto 16px;">Tạo rule để tự động xóa quảng cáo, lọc bài viết theo regex, làm sạch HTML hoặc bóc tách link Google Drive.</div>
+            <button class="btn primary" onclick="openAddRuleModal()">+ Thêm Rule Đầu Tiên</button>
+        </div>'''
+    else:
+        rules_html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px;">'
+        for r in rules_list:
+            r_id = r.get("id", "")
+            r_name = r.get("name", r_id)
+            r_type = r.get("rule_type", "replace")
+            r_desc = r.get("description", "")
+            r_builtin = r.get("builtin", False)
+            used_by = r.get("used_by", [])
+
+            if r_type == "replace":
+                type_badge = '<span class="badge blue" style="font-size:0.68rem;">🔄 Thay thế</span>'
+                tgt = r.get("target_field", "both")
+                tgt_label = "Tiêu đề & Nội dung" if tgt == "both" else ("Tiêu đề" if tgt == "title" else "Nội dung")
+                is_rx = "Regex" if r.get("is_regex") else "Text"
+                pat_preview = r.get("pattern", "")
+                if len(pat_preview) > 55: pat_preview = pat_preview[:52] + "..."
+                preview_box = f'''<div style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:8px 10px; font-family:var(--mono); font-size:0.72rem; color:#cbd5e1; word-break:break-all;">
+                    <div style="color:#38bdf8;">🔍 Tìm ({is_rx} - {tgt_label}): <code>{html.escape(pat_preview)}</code></div>
+                    <div style="color:#34d399; margin-top:2px;">✏️ Đổi thành: <code>"{html.escape(r.get('replacement', ''))}"</code></div>
+                </div>'''
+            elif r_type == "filter":
+                type_badge = '<span class="badge red" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.25); font-size:0.68rem;">⛔ Lọc bài</span>'
+                cond = "Bỏ qua nếu khớp (Exclude)" if r.get("condition") == "exclude" else "Chỉ giữ nếu khớp (Include)"
+                pat_preview = r.get("pattern", "")
+                if len(pat_preview) > 55: pat_preview = pat_preview[:52] + "..."
+                preview_box = f'''<div style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:8px 10px; font-family:var(--mono); font-size:0.72rem; color:#cbd5e1; word-break:break-all;">
+                    <div style="color:#f87171;">⚠️ {cond}</div>
+                    <div style="color:#cbd5e1; margin-top:2px;">Mẫu: <code>{html.escape(pat_preview)}</code></div>
+                </div>'''
+            elif r_type == "format":
+                type_badge = '<span class="badge green" style="background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.25); font-size:0.68rem;">✨ Làm sạch</span>'
+                clean_txt = "Làm sạch HTML rác & tracking" if r.get("clean_html") else "Định dạng text"
+                preview_box = f'''<div style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:8px 10px; font-family:var(--mono); font-size:0.72rem; color:#cbd5e1; word-break:break-all;">
+                    <div style="color:#34d399;">🛡️ {clean_txt}</div>
+                    <div style="color:#94a3b8; margin-top:2px;">Xóa tags: <code>{html.escape(r.get("strip_tags", "script,style,iframe"))}</code></div>
+                </div>'''
+            else:
+                type_badge = '<span class="badge purple" style="background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.25); font-size:0.68rem;">🔗 Bóc link</span>'
+                links_str = ", ".join(r.get("link_types") or ["gdrive"])
+                tag_str = f'| Tag: {r.get("auto_tag")}' if r.get("auto_tag") else ''
+                preview_box = f'''<div style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:8px 10px; font-family:var(--mono); font-size:0.72rem; color:#cbd5e1; word-break:break-all;">
+                    <div style="color:#c084fc;">📥 Quét link: {links_str}</div>
+                    <div style="color:#94a3b8; margin-top:2px;">Action: Hộp tải Enclosure {tag_str}</div>
+                </div>'''
+
+            builtin_badge = '<span class="badge gray" style="font-size:0.65rem;">Mặc định</span>' if r_builtin else '<span class="badge cyan" style="font-size:0.65rem;">Tùy chỉnh</span>'
+
+            if used_by:
+                used_html = '<span style="color:#34d399; font-size:0.7rem;">Áp dụng cho: <strong>' + ", ".join(used_by) + '</strong></span>'
+            else:
+                used_html = '<span style="color:var(--text-dim); font-size:0.7rem;">Chưa gắn scraper nào</span>'
+
+            desc_html = f'<div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 6px; line-height: 1.4;">{html.escape(r_desc)}</div>' if r_desc else ''
+
+            del_btn = f'<button class="btn danger" onclick="deleteRuleModal(\'{r_id}\')" title="Xóa rule này" style="height: 28px; padding: 0 8px; font-size: 0.72rem;"><span>Xóa</span></button>' if not r_builtin else '<button class="btn" disabled title="Rule mặc định của hệ thống" style="height: 28px; padding: 0 8px; font-size: 0.72rem; opacity:0.4; cursor:not-allowed;"><span>Khóa</span></button>'
+
+            rules_html += f"""
+            <div class="task-card rule-item" data-type="{r_type}" style="padding: 14px; margin: 0; display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px;">
+                        <div>
+                            <div style="font-weight: 700; font-size: 0.88rem; color: #fff;">{r_name}</div>
+                            <div style="font-size: 0.68rem; color: var(--text-dim); font-family: var(--mono);">{r_id}</div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            {builtin_badge}
+                            {type_badge}
+                        </div>
+                    </div>
+                    {preview_box}
+                    <div style="margin-top: 8px;">
+                        {used_html}
+                    </div>
+                    {desc_html}
+                </div>
+                <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 12px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
+                    <button class="btn" onclick="duplicateRule('{r_id}')" title="Nhân bản rule này" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">
+                        <span>📋 Nhân bản</span>
+                    </button>
+                    <button class="btn" onclick="openEditRuleModal('{r_id}')" title="Sửa rule này" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">
+                        <span>Sửa</span>
+                    </button>
+                    {del_btn}
+                </div>
+            </div>
+            """
+        rules_html += '</div>'
 
     html_content = f"""<!DOCTYPE html>
 <html lang="vi">
@@ -1449,7 +1601,7 @@ async def dashboard(request: Request):
     /* Quick KPI Bar */
     .kpi-strip {{
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
       gap: 12px;
       margin-bottom: 16px;
     }}
@@ -1525,6 +1677,12 @@ async def dashboard(request: Request):
         <span>Quản lý Profile</span>
         <span class="badge violet" style="margin-left: auto; font-size: 0.65rem; padding: 1px 6px;">{len(profiles)}</span>
       </button>
+
+      <button class="nav-item" id="navItem_rules" onclick="switchMainTab('rules')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <span>Quản lý Rule</span>
+        <span class="badge cyan" style="margin-left: auto; font-size: 0.65rem; padding: 1px 6px;">{len(rules_list)}</span>
+      </button>
     </nav>
 
     <!-- Sidebar Telemetry Badges -->
@@ -1595,6 +1753,14 @@ async def dashboard(request: Request):
             <span>+ Thêm Profile mới</span>
           </button>
         </div>
+
+        <!-- Rules Actions -->
+        <div id="topbarActions_rules" style="display: none; align-items: center; gap: 8px;">
+          <button class="btn primary" onclick="openAddRuleModal()" style="height: 32px; font-size: 0.76rem;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>+ Thêm Rule mới</span>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -1637,6 +1803,15 @@ async def dashboard(request: Request):
             <div class="kpi-info">
               <div class="kpi-label">Kho Profile 🌐</div>
               <div class="kpi-val">{len(profiles)} Profiles</div>
+            </div>
+          </div>
+          <div class="kpi-box clickable" onclick="switchMainTab('rules')" style="cursor: pointer;" title="Bấm để chuyển sang Quản lý Rule Output">
+            <div class="kpi-icon" style="background: rgba(6, 182, 212, 0.15); color: #22d3ee;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </div>
+            <div class="kpi-info">
+              <div class="kpi-label">Kho Rule Output ⚡</div>
+              <div class="kpi-val">{len(rules_list)} Rules</div>
             </div>
           </div>
         </div>
@@ -1720,6 +1895,29 @@ async def dashboard(request: Request):
         <!-- Profiles List Grouped by Domain -->
         <div id="viewProfilesList">
           {profiles_html}
+        </div>
+      </div>
+
+      <!-- TAB 4: QUẢN LÝ RULE (Kho Rule xử lý output: Replace, Filter, Format, Extract Links) -->
+      <div id="view_rules" class="main-tab-content" style="display: none;">
+        <!-- Controls Bar & Rule Pills -->
+        <div class="controls-bar" style="margin-bottom: 14px; margin-top: 4px;">
+          <div class="filter-pills" id="ruleFilterPills">
+            {rule_pills}
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="text" class="form-input" placeholder="🔍 Tìm rule, từ khóa..." style="height: 30px; font-size: 0.74rem; width: 170px;" oninput="filterRulesBySearch(this.value)">
+            <button class="btn primary" onclick="openAddRuleModal()" title="Thêm Rule xử lý mới" style="height: 30px; font-size: 0.74rem;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <span>+ Thêm Rule</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Rule Cards Grid -->
+        <div id="viewRulesList">
+          {rules_html}
         </div>
       </div>
     </main>
@@ -1947,6 +2145,20 @@ async def dashboard(request: Request):
               <div class="form-hint">Phân tách dấu phẩy. Bỏ qua nếu chứa từ này.</div>
             </div>
           </div>
+
+          <!-- Output Rules Pipeline -->
+          <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed rgba(255, 255, 255, 0.08);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+              <label class="form-label" style="margin: 0; font-weight: 600; color: #38bdf8; display: flex; align-items: center; gap: 6px;">
+                <span>⚡ Pipeline Xử lý Output (Rule Engine)</span>
+              </label>
+              <a href="javascript:void(0)" onclick="closeModal('modalAdd'); switchMainTab('rules');" style="font-size: 0.7rem; color: var(--accent); text-decoration: none;">+ Quản lý kho Rule &rarr;</a>
+            </div>
+            <div class="form-hint" style="margin-bottom: 8px;">Chọn các rule áp dụng cho luồng bài viết của scraper này (xóa quảng cáo, làm sạch HTML, bóc link Drive, lọc nâng cao):</div>
+            <div id="feedAppliedRulesContainer" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 160px; overflow-y: auto; padding: 8px; background: rgba(15, 23, 42, 0.5); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.05);">
+              <div style="color: var(--text-dim); font-size: 0.75rem; grid-column: span 2;">Đang tải danh sách rule...</div>
+            </div>
+          </div>
         </div>
 
         <div style="display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:20px; padding-top:16px; border-top:1px solid var(--card-border);">
@@ -2127,6 +2339,189 @@ async def dashboard(request: Request):
     </div>
   </div>
 
+  <!-- MODAL: ADD / EDIT RULE -->
+  <div id="modalRuleEdit" class="modal-overlay" onclick="handleModalClick(event, 'modalRuleEdit')">
+    <div class="modal-card" style="width: min(680px, 100%);">
+      <div class="modal-head">
+        <div>
+          <h2 class="modal-title" id="lblModalRuleTitle">Thêm Rule Xử Lý Output</h2>
+          <div style="font-size:0.75rem; color:var(--text-dim); margin-top:2px;">Tùy biến bộ lọc, định dạng text hoặc bóc link đính kèm cho bài viết.</div>
+        </div>
+        <button class="modal-close" onclick="closeModal('modalRuleEdit')">✕</button>
+      </div>
+
+      <form id="formRuleEdit" onsubmit="handleSaveRule(event)">
+        <input type="hidden" id="ruleIsEdit" value="false">
+
+        <!-- Name & ID -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
+          <div>
+            <label class="form-label required">Tên Rule</label>
+            <input type="text" id="ruleName" class="form-input" required placeholder="vd: Xóa quảng cáo Telegram" oninput="autoGenerateRuleId(this.value)">
+          </div>
+          <div>
+            <label class="form-label required">Mã định danh (ID Slug)</label>
+            <input type="text" id="ruleId" class="form-input" required placeholder="vd: clean_tg_ads" style="font-family: var(--mono); font-size: 0.8rem;">
+          </div>
+        </div>
+
+        <!-- Rule Type -->
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label required">Loại Rule (Action Type)</label>
+          <select id="ruleType" class="form-select" onchange="handleRuleTypeChange(this.value)" style="font-weight: 600;">
+            <option value="replace">🔄 Tìm kiếm &amp; Thay thế (Text / Regex Replace)</option>
+            <option value="filter">⛔ Lọc bài viết (Conditional Filter: Include / Exclude)</option>
+            <option value="format">✨ Định dạng &amp; Làm sạch (Sanitize HTML / Prefix / Truncate)</option>
+            <option value="extract_links">🔗 Bóc tách link đính kèm (Google Drive / Fshare / Mega)</option>
+          </select>
+        </div>
+
+        <!-- DYNAMIC GROUP 1: REPLACE -->
+        <div id="groupRuleReplace" class="rule-type-group" style="padding: 12px; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin-bottom: 14px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+            <div>
+              <label class="form-label">Phạm vi áp dụng (Target Field)</label>
+              <select id="ruleReplaceTarget" class="form-select" style="font-size: 0.8rem;">
+                <option value="both">Cả Tiêu đề &amp; Nội dung</option>
+                <option value="title">Chỉ Tiêu đề</option>
+                <option value="content">Chỉ Nội dung</option>
+              </select>
+            </div>
+            <div style="display: flex; align-items: flex-end; padding-bottom: 6px;">
+              <label style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--text-muted); cursor: pointer;">
+                <input type="checkbox" id="ruleReplaceIsRegex">
+                <span>Biểu thức chính quy (Regex Pattern)</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom: 10px;">
+            <label class="form-label required">Chuỗi hoặc Mẫu tìm kiếm (Pattern)</label>
+            <input type="text" id="ruleReplacePattern" class="form-input" placeholder="vd: https?://t\.me/\S+|\[Quảng cáo\]" style="font-family: var(--mono); font-size: 0.8rem;">
+            <div class="form-hint">Nhập từ khóa đơn giản hoặc biểu thức Regex muốn tìm và thay thế.</div>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label">Thay thế bằng (Replacement)</label>
+            <input type="text" id="ruleReplaceReplacement" class="form-input" placeholder="Để trống nếu muốn XÓA HOÀN TOÀN chuỗi tìm được" style="font-family: var(--mono); font-size: 0.8rem;">
+          </div>
+        </div>
+
+        <!-- DYNAMIC GROUP 2: FILTER -->
+        <div id="groupRuleFilter" class="rule-type-group" style="display: none; padding: 12px; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin-bottom: 14px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+            <div>
+              <label class="form-label">Điều kiện lọc (Condition)</label>
+              <select id="ruleFilterCondition" class="form-select" style="font-size: 0.8rem;">
+                <option value="exclude">⛔ Bỏ qua nếu khớp (Exclude / Drop post)</option>
+                <option value="include">✅ Chỉ giữ lại nếu khớp (Include only)</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label">Kiểm tra trong (Target)</label>
+              <select id="ruleFilterTarget" class="form-select" style="font-size: 0.8rem;">
+                <option value="both">Cả Tiêu đề &amp; Nội dung</option>
+                <option value="title">Chỉ Tiêu đề</option>
+                <option value="content">Chỉ Nội dung</option>
+                <option value="author">Tên Tác giả</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label class="form-label required" style="margin:0;">Mẫu từ khóa hoặc Regex (Pattern)</label>
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: var(--text-muted); cursor: pointer;">
+                <input type="checkbox" id="ruleFilterIsRegex" checked>
+                <span>Sử dụng Regex</span>
+              </label>
+            </div>
+            <input type="text" id="ruleFilterPattern" class="form-input" placeholder="vd: giveaway|tuyển dụng|khuyến mãi|shopee\.vn" style="font-family: var(--mono); font-size: 0.8rem;">
+            <div class="form-hint">Nếu chọn Exclude, bài viết chứa từ khóa này sẽ bị lọc bỏ khỏi luồng RSS.</div>
+          </div>
+        </div>
+
+        <!-- DYNAMIC GROUP 3: FORMAT -->
+        <div id="groupRuleFormat" class="rule-type-group" style="display: none; padding: 12px; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin-bottom: 14px;">
+          <div style="margin-bottom: 10px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--text-muted); cursor: pointer;">
+              <input type="checkbox" id="ruleFormatCleanHtml" checked>
+              <span>🛡️ Tự động làm sạch mã HTML độc hại &amp; rác tracking</span>
+            </label>
+          </div>
+          <div class="form-group" style="margin-bottom: 10px;">
+            <label class="form-label">Thẻ HTML cần loại bỏ triệt để (Strip Tags)</label>
+            <input type="text" id="ruleFormatStripTags" class="form-input" value="script,style,iframe,object,embed,form" style="font-family: var(--mono); font-size: 0.8rem;">
+            <div class="form-hint">Phân tách dấu phẩy. Các thẻ này và nội dung bên trong sẽ bị loại bỏ.</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+            <div>
+              <label class="form-label">Tiền tố tiêu đề (Title Prefix)</label>
+              <input type="text" id="ruleFormatTitlePrefix" class="form-input" placeholder="vd: [Tin mới] " style="font-size: 0.8rem;">
+            </div>
+            <div>
+              <label class="form-label">Hậu tố tiêu đề (Title Suffix)</label>
+              <input type="text" id="ruleFormatTitleSuffix" class="form-input" placeholder="vd:  - ClaraOS" style="font-size: 0.8rem;">
+            </div>
+          </div>
+          <div>
+            <label class="form-label">Cắt ngắn nội dung tối đa (Truncate chars)</label>
+            <input type="number" id="ruleFormatTruncate" class="form-input" placeholder="Để trống nếu không muốn cắt (vd: 500)" min="50" max="50000" style="font-size: 0.8rem;">
+          </div>
+        </div>
+
+        <!-- DYNAMIC GROUP 4: EXTRACT LINKS -->
+        <div id="groupRuleExtract" class="rule-type-group" style="display: none; padding: 12px; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin-bottom: 14px;">
+          <label class="form-label">Dịch vụ lưu trữ cần quét link tải:</label>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px;">
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 0.76rem; color: var(--text-muted); cursor: pointer;">
+              <input type="checkbox" id="chkExtractGdrive" checked>
+              <span>Google Drive</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 0.76rem; color: var(--text-muted); cursor: pointer;">
+              <input type="checkbox" id="chkExtractFshare" checked>
+              <span>Fshare.vn</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 0.76rem; color: var(--text-muted); cursor: pointer;">
+              <input type="checkbox" id="chkExtractMega" checked>
+              <span>Mega.nz</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 0.76rem; color: var(--text-muted); cursor: pointer;">
+              <input type="checkbox" id="chkExtractMediafire" checked>
+              <span>Mediafire</span>
+            </label>
+          </div>
+          <div class="form-group" style="margin-bottom: 10px;">
+            <label class="form-label">Regex quét link tùy biến (Custom Regex)</label>
+            <input type="text" id="ruleExtractCustomRegex" class="form-input" placeholder="Để trống hoặc vd: https?://(?:www\.)?example\.com/download/\w+" style="font-family: var(--mono); font-size: 0.8rem;">
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div>
+              <label class="form-label">Tự động gắn Tag vào đầu Tiêu đề</label>
+              <input type="text" id="ruleExtractAutoTag" class="form-input" placeholder="vd: [Ebook] hoặc [Download]" style="font-size: 0.8rem;">
+            </div>
+            <div style="display: flex; align-items: flex-end; padding-bottom: 6px;">
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--text-muted); cursor: pointer;">
+                <input type="checkbox" id="ruleExtractEnclosure" checked>
+                <span>Gắn Download Box &amp; Enclosure</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Description -->
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label class="form-label">Mô tả tóm tắt công dụng</label>
+          <input type="text" id="ruleDesc" class="form-input" placeholder="vd: Tự động bóc tách link Google Drive từ bài viết và thêm tag [Ebook]">
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; padding-top:14px; border-top:1px solid var(--card-border);">
+          <button type="button" class="btn" onclick="closeModal('modalRuleEdit')" style="height:32px; font-size:0.76rem;">Hủy</button>
+          <button type="submit" class="btn primary" id="btnSubmitRule" style="height:32px; font-size:0.76rem;">
+            <span id="btnSubmitRuleText">Lưu Rule</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Toast Notification -->
   <div id="toast" class="toast">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px; color: #34d399;"><polyline points="20 6 9 17 4 12"/></svg>
@@ -2273,6 +2668,7 @@ async def dashboard(request: Request):
       if (btnText) btnText.innerText = 'Lưu & Kích hoạt Feed';
 
       populateProfileDropdown();
+      populateFeedRulesCheckboxes([]);
       openModal('modalAdd');
     }}
 
@@ -2358,6 +2754,8 @@ async def dashboard(request: Request):
           const feedIntervalVal = parseInt(f.interval_minutes) || 30;
           if (document.getElementById('feedInterval')) document.getElementById('feedInterval').value = String(feedIntervalVal);
           updateFormPresetHighlight(feedIntervalVal);
+
+          populateFeedRulesCheckboxes(f.applied_rules || []);
 
           const title = document.getElementById('modalAddTitle');
           if (title) title.innerText = 'Cấu hình Kênh Scraper: ' + (f.title || f.slug);
@@ -2726,6 +3124,11 @@ async def dashboard(request: Request):
         filter_exclude: document.getElementById('outFilterExclude') ? document.getElementById('outFilterExclude').value.trim() : ''
       }};
 
+      const appliedRules = [];
+      document.querySelectorAll('#feedAppliedRulesContainer input[type="checkbox"]:checked').forEach(cb => {{
+        appliedRules.push(cb.value);
+      }});
+
       const payload = {{
         original_slug: originalSlug,
         title: document.getElementById('feedTitle').value.trim(),
@@ -2743,6 +3146,7 @@ async def dashboard(request: Request):
         use_flaresolverr: document.getElementById('chkUseFlareSolverr') ? document.getElementById('chkUseFlareSolverr').checked : false,
         selectors: selectors,
         custom_output: customOutput,
+        applied_rules: appliedRules,
         interval_minutes: parseInt(document.getElementById('feedInterval') ? document.getElementById('feedInterval').value : 0) || 0
       }};
 
@@ -2923,9 +3327,48 @@ async def dashboard(request: Request):
       }});
     }}
 
+    function populateFeedRulesCheckboxes(appliedIds = []) {{
+      const container = document.getElementById('feedAppliedRulesContainer');
+      if (!container) return;
+      container.innerHTML = '<div style="color: var(--text-dim); font-size: 0.75rem; grid-column: span 2;">Đang tải danh sách rule...</div>';
+
+      fetch('/api/rules')
+        .then(r => r.json())
+        .then(rules => {{
+          if (!rules || rules.length === 0) {{
+            container.innerHTML = '<div style="color: var(--text-dim); font-size: 0.75rem; grid-column: span 2;">Chưa có rule nào trong kho. Bấm "+ Quản lý kho Rule" để tạo mới!</div>';
+            return;
+          }}
+          container.innerHTML = '';
+          rules.forEach(r => {{
+            const isChecked = appliedIds && appliedIds.includes(r.id);
+            let typeIcon = '🔄';
+            if (r.rule_type === 'filter') typeIcon = '⛔';
+            else if (r.rule_type === 'format') typeIcon = '✨';
+            else if (r.rule_type === 'extract_links') typeIcon = '🔗';
+
+            const label = document.createElement('label');
+            label.style.cssText = 'display: flex; align-items: flex-start; gap: 8px; font-size: 0.74rem; color: #e2e8f0; cursor: pointer; padding: 6px 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; transition: all 0.15s;';
+            label.innerHTML = `
+              <input type="checkbox" value="${{r.id}}" ${{isChecked ? 'checked' : ''}} style="margin-top: 2px;">
+              <div style="min-width: 0;">
+                <div style="font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  <span>${{typeIcon}}</span> <span>${{r.name}}</span>
+                </div>
+                <div style="font-size: 0.65rem; color: var(--text-dim); font-family: var(--mono);">${{r.id}}</div>
+              </div>
+            `;
+            container.appendChild(label);
+          }});
+        }})
+        .catch(err => {{
+          container.innerHTML = '<div style="color: #f87171; font-size: 0.75rem; grid-column: span 2;">Lỗi tải rules: ' + err + '</div>';
+        }});
+    }}
+
     // TAB NAVIGATION & STATE
     function switchMainTab(tab, updateHash = true) {{
-      const validTabs = ['dashboard', 'scrapers', 'profiles'];
+      const validTabs = ['dashboard', 'scrapers', 'profiles', 'rules'];
       if (!validTabs.includes(tab)) tab = 'dashboard';
 
       // Update sidebar nav items
@@ -2959,6 +3402,7 @@ async def dashboard(request: Request):
         if (tab === 'dashboard') titleEl.innerText = 'Dashboard & Giám sát Lượt cào';
         else if (tab === 'scrapers') titleEl.innerText = 'Quản lý Scraper & Kênh Feed';
         else if (tab === 'profiles') titleEl.innerText = 'Quản lý Profile & Xác thực Domain';
+        else if (tab === 'rules') titleEl.innerText = 'Quản lý Rule & Xử lý Output';
       }}
 
       // Sync URL hash
@@ -2968,6 +3412,269 @@ async def dashboard(request: Request):
 
       // Close mobile sidebar
       toggleSidebar(false);
+    }}
+
+    // RULES UI MANAGEMENT
+    function autoGenerateRuleId(name) {{
+      const isEdit = document.getElementById('ruleIsEdit').value === 'true';
+      if (isEdit) return;
+      const slug = (name || '').toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+      document.getElementById('ruleId').value = slug;
+    }}
+
+    function handleRuleTypeChange(type) {{
+      document.querySelectorAll('.rule-type-group').forEach(el => el.style.display = 'none');
+      if (type === 'replace') {{
+        document.getElementById('groupRuleReplace').style.display = 'block';
+      }} else if (type === 'filter') {{
+        document.getElementById('groupRuleFilter').style.display = 'block';
+      }} else if (type === 'format') {{
+        document.getElementById('groupRuleFormat').style.display = 'block';
+      }} else if (type === 'extract_links') {{
+        document.getElementById('groupRuleExtract').style.display = 'block';
+      }}
+    }}
+
+    function openAddRuleModal() {{
+      const form = document.getElementById('formRuleEdit');
+      if (form) form.reset();
+      document.getElementById('ruleIsEdit').value = 'false';
+      const idInput = document.getElementById('ruleId');
+      idInput.readOnly = false;
+      idInput.style.opacity = '1';
+
+      document.getElementById('ruleType').value = 'replace';
+      handleRuleTypeChange('replace');
+
+      document.getElementById('ruleReplaceTarget').value = 'both';
+      document.getElementById('ruleReplaceIsRegex').checked = false;
+      document.getElementById('ruleFilterCondition').value = 'exclude';
+      document.getElementById('ruleFilterTarget').value = 'both';
+      document.getElementById('ruleFilterIsRegex').checked = true;
+      document.getElementById('ruleFormatCleanHtml').checked = true;
+      document.getElementById('ruleFormatStripTags').value = 'script,style,iframe,object,embed,form';
+      document.getElementById('chkExtractGdrive').checked = true;
+      document.getElementById('chkExtractFshare').checked = true;
+      document.getElementById('chkExtractMega').checked = true;
+      document.getElementById('chkExtractMediafire').checked = true;
+      document.getElementById('ruleExtractEnclosure').checked = true;
+
+      document.getElementById('lblModalRuleTitle').innerText = 'Thêm Rule Xử Lý Output';
+      document.getElementById('btnSubmitRuleText').innerText = 'Lưu Rule';
+      openModal('modalRuleEdit');
+    }}
+
+    function openEditRuleModal(ruleId) {{
+      fetch('/api/rules/' + ruleId)
+        .then(r => {{
+          if (!r.ok) throw new Error('Không thể tải rule');
+          return r.json();
+        }})
+        .then(rule => {{
+          document.getElementById('ruleIsEdit').value = 'true';
+          document.getElementById('ruleName').value = rule.name || '';
+          const idInput = document.getElementById('ruleId');
+          idInput.value = rule.id || '';
+          idInput.readOnly = true;
+          idInput.style.opacity = '0.7';
+
+          const rType = rule.rule_type || 'replace';
+          document.getElementById('ruleType').value = rType;
+          handleRuleTypeChange(rType);
+
+          if (rType === 'replace') {{
+            document.getElementById('ruleReplaceTarget').value = rule.target_field || 'both';
+            document.getElementById('ruleReplaceIsRegex').checked = Boolean(rule.is_regex);
+            document.getElementById('ruleReplacePattern').value = rule.pattern || '';
+            document.getElementById('ruleReplaceReplacement').value = rule.replacement || '';
+          }} else if (rType === 'filter') {{
+            document.getElementById('ruleFilterCondition').value = rule.condition || 'exclude';
+            document.getElementById('ruleFilterTarget').value = rule.target_field || 'both';
+            document.getElementById('ruleFilterIsRegex').checked = rule.is_regex !== false;
+            document.getElementById('ruleFilterPattern').value = rule.pattern || '';
+          }} else if (rType === 'format') {{
+            document.getElementById('ruleFormatCleanHtml').checked = rule.clean_html !== false;
+            document.getElementById('ruleFormatStripTags').value = rule.strip_tags || 'script,style,iframe,object,embed,form';
+            document.getElementById('ruleFormatTitlePrefix').value = rule.title_prefix || '';
+            document.getElementById('ruleFormatTitleSuffix').value = rule.title_suffix || '';
+            document.getElementById('ruleFormatTruncate').value = rule.truncate_chars || '';
+          }} else if (rType === 'extract_links') {{
+            const types = rule.link_types || ['gdrive'];
+            document.getElementById('chkExtractGdrive').checked = types.includes('gdrive');
+            document.getElementById('chkExtractFshare').checked = types.includes('fshare');
+            document.getElementById('chkExtractMega').checked = types.includes('mega');
+            document.getElementById('chkExtractMediafire').checked = types.includes('mediafire');
+            document.getElementById('ruleExtractCustomRegex').value = rule.custom_regex || '';
+            document.getElementById('ruleExtractAutoTag').value = rule.auto_tag || '';
+            document.getElementById('ruleExtractEnclosure').checked = rule.add_enclosure !== false;
+          }}
+
+          document.getElementById('ruleDesc').value = rule.description || '';
+          document.getElementById('lblModalRuleTitle').innerText = 'Sửa Rule: ' + (rule.name || rule.id);
+          document.getElementById('btnSubmitRuleText').innerText = 'Cập nhật Rule';
+          openModal('modalRuleEdit');
+        }})
+        .catch(err => showToast('Lỗi: ' + err, true));
+    }}
+
+    function duplicateRule(ruleId) {{
+      fetch('/api/rules/' + ruleId)
+        .then(r => {{
+          if (!r.ok) throw new Error('Không thể tải rule');
+          return r.json();
+        }})
+        .then(rule => {{
+          document.getElementById('ruleIsEdit').value = 'false';
+          document.getElementById('ruleName').value = (rule.name || '') + ' (Copy)';
+          const idInput = document.getElementById('ruleId');
+          idInput.value = (rule.id || '') + '_copy';
+          idInput.readOnly = false;
+          idInput.style.opacity = '1';
+
+          const rType = rule.rule_type || 'replace';
+          document.getElementById('ruleType').value = rType;
+          handleRuleTypeChange(rType);
+
+          if (rType === 'replace') {{
+            document.getElementById('ruleReplaceTarget').value = rule.target_field || 'both';
+            document.getElementById('ruleReplaceIsRegex').checked = Boolean(rule.is_regex);
+            document.getElementById('ruleReplacePattern').value = rule.pattern || '';
+            document.getElementById('ruleReplaceReplacement').value = rule.replacement || '';
+          }} else if (rType === 'filter') {{
+            document.getElementById('ruleFilterCondition').value = rule.condition || 'exclude';
+            document.getElementById('ruleFilterTarget').value = rule.target_field || 'both';
+            document.getElementById('ruleFilterIsRegex').checked = rule.is_regex !== false;
+            document.getElementById('ruleFilterPattern').value = rule.pattern || '';
+          }} else if (rType === 'format') {{
+            document.getElementById('ruleFormatCleanHtml').checked = rule.clean_html !== false;
+            document.getElementById('ruleFormatStripTags').value = rule.strip_tags || 'script,style,iframe,object,embed,form';
+            document.getElementById('ruleFormatTitlePrefix').value = rule.title_prefix || '';
+            document.getElementById('ruleFormatTitleSuffix').value = rule.title_suffix || '';
+            document.getElementById('ruleFormatTruncate').value = rule.truncate_chars || '';
+          }} else if (rType === 'extract_links') {{
+            const types = rule.link_types || ['gdrive'];
+            document.getElementById('chkExtractGdrive').checked = types.includes('gdrive');
+            document.getElementById('chkExtractFshare').checked = types.includes('fshare');
+            document.getElementById('chkExtractMega').checked = types.includes('mega');
+            document.getElementById('chkExtractMediafire').checked = types.includes('mediafire');
+            document.getElementById('ruleExtractCustomRegex').value = rule.custom_regex || '';
+            document.getElementById('ruleExtractAutoTag').value = rule.auto_tag || '';
+            document.getElementById('ruleExtractEnclosure').checked = rule.add_enclosure !== false;
+          }}
+
+          document.getElementById('ruleDesc').value = rule.description || '';
+          document.getElementById('lblModalRuleTitle').innerText = 'Nhân bản Rule: ' + (rule.name || rule.id);
+          document.getElementById('btnSubmitRuleText').innerText = 'Lưu Rule mới';
+          openModal('modalRuleEdit');
+        }})
+        .catch(err => showToast('Lỗi: ' + err, true));
+    }}
+
+    function handleSaveRule(e) {{
+      e.preventDefault();
+      const btn = document.getElementById('btnSubmitRule');
+      btn.disabled = true;
+      btn.innerText = 'Đang lưu...';
+
+      const rType = document.getElementById('ruleType').value;
+      const payload = {{
+        id: document.getElementById('ruleId').value.trim(),
+        name: document.getElementById('ruleName').value.trim(),
+        rule_type: rType,
+        description: document.getElementById('ruleDesc').value.trim()
+      }};
+
+      if (rType === 'replace') {{
+        payload.target_field = document.getElementById('ruleReplaceTarget').value;
+        payload.is_regex = document.getElementById('ruleReplaceIsRegex').checked;
+        payload.pattern = document.getElementById('ruleReplacePattern').value;
+        payload.replacement = document.getElementById('ruleReplaceReplacement').value;
+      }} else if (rType === 'filter') {{
+        payload.condition = document.getElementById('ruleFilterCondition').value;
+        payload.target_field = document.getElementById('ruleFilterTarget').value;
+        payload.is_regex = document.getElementById('ruleFilterIsRegex').checked;
+        payload.pattern = document.getElementById('ruleFilterPattern').value;
+      }} else if (rType === 'format') {{
+        payload.clean_html = document.getElementById('ruleFormatCleanHtml').checked;
+        payload.strip_tags = document.getElementById('ruleFormatStripTags').value.trim();
+        payload.title_prefix = document.getElementById('ruleFormatTitlePrefix').value;
+        payload.title_suffix = document.getElementById('ruleFormatTitleSuffix').value;
+        const trunc = parseInt(document.getElementById('ruleFormatTruncate').value);
+        payload.truncate_chars = isNaN(trunc) ? null : trunc;
+      }} else if (rType === 'extract_links') {{
+        const linkTypes = [];
+        if (document.getElementById('chkExtractGdrive').checked) linkTypes.push('gdrive');
+        if (document.getElementById('chkExtractFshare').checked) linkTypes.push('fshare');
+        if (document.getElementById('chkExtractMega').checked) linkTypes.push('mega');
+        if (document.getElementById('chkExtractMediafire').checked) linkTypes.push('mediafire');
+        payload.link_types = linkTypes;
+        payload.custom_regex = document.getElementById('ruleExtractCustomRegex').value.trim();
+        payload.auto_tag = document.getElementById('ruleExtractAutoTag').value.trim();
+        payload.add_enclosure = document.getElementById('ruleExtractEnclosure').checked;
+      }}
+
+      fetch('/api/rules', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify(payload)
+      }})
+      .then(r => {{
+        if (!r.ok) return r.json().then(err => Promise.reject(err.detail || 'Lỗi server'));
+        return r.json();
+      }})
+      .then(d => {{
+        showToast('Đã lưu rule [' + d.id + '] thành công!');
+        closeModal('modalRuleEdit');
+        setTimeout(() => location.reload(), 800);
+      }})
+      .catch(err => {{
+        showToast('Lỗi: ' + err, true);
+        btn.disabled = false;
+        btn.innerText = 'Lưu Rule';
+      }});
+    }}
+
+    function deleteRuleModal(ruleId) {{
+      if (!confirm('Bạn có chắc chắn muốn xóa rule [' + ruleId + '] không?')) return;
+      fetch('/api/rules/' + ruleId, {{ method: 'DELETE' }})
+        .then(r => {{
+          if (!r.ok) return r.json().then(err => Promise.reject(err.detail || 'Lỗi server'));
+          return r.json();
+        }})
+        .then(d => {{
+          showToast('Đã xóa rule [' + d.id + ']!');
+          setTimeout(() => location.reload(), 800);
+        }})
+        .catch(err => showToast('Lỗi: ' + err, true));
+    }}
+
+    function filterRules(type, pill) {{
+      document.querySelectorAll('#ruleFilterPills .pill').forEach(p => p.classList.remove('active'));
+      if (pill) pill.classList.add('active');
+
+      const items = document.querySelectorAll('#viewRulesList .rule-item');
+      items.forEach(it => {{
+        if (type === 'all' || it.dataset.type === type) {{
+          it.style.display = 'flex';
+        }} else {{
+          it.style.display = 'none';
+        }}
+      }});
+    }}
+
+    function filterRulesBySearch(query) {{
+      const q = (query || '').toLowerCase().trim();
+      const items = document.querySelectorAll('#viewRulesList .rule-item');
+      items.forEach(it => {{
+        if (!q || it.textContent.toLowerCase().includes(q)) {{
+          it.style.display = 'flex';
+        }} else {{
+          it.style.display = 'none';
+        }}
+      }});
     }}
 
     function filterDashboardTable(query) {{
@@ -3028,7 +3735,7 @@ async def dashboard(request: Request):
 
     window.addEventListener('DOMContentLoaded', () => {{
       const hash = window.location.hash.replace('#', '');
-      if (['dashboard', 'scrapers', 'profiles'].includes(hash)) {{
+      if (['dashboard', 'scrapers', 'profiles', 'rules'].includes(hash)) {{
         switchMainTab(hash, false);
       }} else {{
         switchMainTab('dashboard', false);
@@ -3037,7 +3744,7 @@ async def dashboard(request: Request):
 
     window.addEventListener('hashchange', () => {{
       const hash = window.location.hash.replace('#', '');
-      if (['dashboard', 'scrapers', 'profiles'].includes(hash)) {{
+      if (['dashboard', 'scrapers', 'profiles', 'rules'].includes(hash)) {{
         switchMainTab(hash, false);
       }}
     }});
