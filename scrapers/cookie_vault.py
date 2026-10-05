@@ -100,22 +100,67 @@ def mask_cookie(cookie: str) -> str:
         return "****"
     return f"{c[:6]}...{c[-6:]}"
 
-def get_vault_summary() -> list:
+def mask_secret(secret: str) -> str:
+    if not secret: return "Chưa cấu hình"
+    s = secret.strip()
+    if len(s) <= 8:
+        return "••••••••"
+    return f"{s[:3]}••••{s[-3:]}"
+
+def get_vault_summary(feeds: dict = None) -> list:
     vault = load_vault()
     summary = []
+    
+    # Calculate usage by feeds
+    feed_usage = {}
+    if feeds:
+        for f_slug, f_meta in feeds.items():
+            pid = f_meta.get("cookie_profile")
+            if pid:
+                feed_usage.setdefault(pid, []).append(f_slug)
+
     for k, v in vault.items():
+        domain = v.get("domain") or v.get("website", "generic")
+        auth_type = v.get("auth_type", "cookie")
+        cookie_val = v.get("cookie", "")
+        username = v.get("username", "")
+        api_key = v.get("api_key", "")
+        header_name = v.get("header_name", "Authorization")
+        
+        if auth_type == "cookie":
+            masked = mask_cookie(cookie_val)
+            has_creds = bool(cookie_val)
+        elif auth_type == "login":
+            masked = f"User: {username} | Pass: ••••••••" if username else "Chưa có tài khoản"
+            has_creds = bool(username or v.get("password"))
+        elif auth_type == "api_key":
+            masked = f"{header_name}: {mask_secret(api_key)}" if api_key else "Chưa có API key"
+            has_creds = bool(api_key)
+        else:
+            masked = "Custom Headers"
+            has_creds = bool(v.get("custom_headers"))
+
+        used_by = feed_usage.get(k, [])
+
         summary.append({
             "id": v.get("id", k),
             "name": v.get("name", k),
-            "website": v.get("website", "generic"),
+            "domain": domain,
+            "website": domain,
+            "auth_type": auth_type,
             "scraper_type": v.get("scraper_type", "web"),
-            "masked": mask_cookie(v.get("cookie", "")),
-            "has_cookie": bool(v.get("cookie")),
+            "masked": masked,
+            "has_cookie": bool(cookie_val),
+            "has_credentials": has_creds,
+            "username": username,
+            "header_name": header_name,
             "description": v.get("description", ""),
-            "updated_at": v.get("updated_at", "")
+            "updated_at": v.get("updated_at", ""),
+            "used_by": used_by,
+            "used_count": len(used_by)
         })
-    # Sort by website then name
-    summary.sort(key=lambda x: (x["website"], x["name"]))
+    # Sort by domain then name
+    summary.sort(key=lambda x: (x["domain"], x["name"]))
     return summary
 
 def get_cookie_by_id(profile_id: str) -> str:
@@ -123,6 +168,17 @@ def get_cookie_by_id(profile_id: str) -> str:
     if profile_id in vault:
         return vault[profile_id].get("cookie", "").strip()
     return ""
+
+def get_profile_by_id(profile_id: str) -> dict:
+    vault = load_vault()
+    if profile_id in vault:
+        prof = vault[profile_id].copy()
+        if "domain" not in prof:
+            prof["domain"] = prof.get("website", "generic")
+        if "auth_type" not in prof:
+            prof["auth_type"] = "cookie"
+        return prof
+    return {}
 
 def resolve_effective_cookie(feed_meta: dict) -> str:
     mode = feed_meta.get("cookie_mode", "none")
@@ -133,3 +189,31 @@ def resolve_effective_cookie(feed_meta: dict) -> str:
         if profile_id:
             return get_cookie_by_id(profile_id)
     return ""
+
+def resolve_effective_auth(feed_meta: dict) -> dict:
+    """Returns effective auth headers and cookies for a feed."""
+    mode = feed_meta.get("cookie_mode", "none")
+    result = {"cookie": "", "headers": {}}
+    if mode == "custom":
+        result["cookie"] = feed_meta.get("cookie", "").strip()
+        return result
+    elif mode == "profile":
+        profile_id = feed_meta.get("cookie_profile", "")
+        if profile_id:
+            prof = get_profile_by_id(profile_id)
+            auth_type = prof.get("auth_type", "cookie")
+            if auth_type == "cookie":
+                result["cookie"] = prof.get("cookie", "").strip()
+            elif auth_type == "api_key":
+                h_name = prof.get("header_name", "Authorization")
+                k_val = prof.get("api_key", "").strip()
+                if h_name and k_val:
+                    result["headers"][h_name] = k_val
+            elif auth_type == "custom_header":
+                try:
+                    custom = json.loads(prof.get("custom_headers", "{}"))
+                    if isinstance(custom, dict):
+                        result["headers"].update(custom)
+                except Exception:
+                    pass
+    return result

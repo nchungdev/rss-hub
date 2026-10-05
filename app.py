@@ -20,7 +20,9 @@ from scrapers.cookie_vault import (
     save_vault,
     get_vault_summary,
     get_cookie_by_id,
-    resolve_effective_cookie
+    get_profile_by_id,
+    resolve_effective_cookie,
+    resolve_effective_auth
 )
 from formatters.rss import generate_rss_xml
 from formatters.json_feed import generate_json_feed
@@ -80,52 +82,84 @@ async def startup_event():
 def health_check():
     return {"status": "ok", "service": "claraos-rss-hub"}
 
-@app.get("/api/cookies")
-def api_get_cookies():
-    return get_vault_summary()
+@app.get("/api/profiles")
+def api_get_profiles():
+    feeds = load_feeds()
+    return get_vault_summary(feeds)
 
-@app.get("/api/cookies/{profile_id}")
-def api_get_cookie_detail(profile_id: str):
-    vault = load_vault()
-    if profile_id in vault:
-        return vault[profile_id]
+@app.get("/api/profiles/{profile_id}")
+def api_get_profile_detail(profile_id: str):
+    prof = get_profile_by_id(profile_id)
+    if prof:
+        return prof
     raise HTTPException(status_code=404, detail="Không tìm thấy profile")
 
-@app.post("/api/cookies")
-async def api_create_or_update_cookie(request: Request):
+@app.post("/api/profiles")
+async def api_create_or_update_profile(request: Request):
     data = await request.json()
     raw_id = data.get("id") or data.get("name", "")
     profile_id = sanitize_slug(raw_id)
     if not profile_id:
-        raise HTTPException(status_code=400, detail="Tên hoặc ID profile cookie không hợp lệ")
+        raise HTTPException(status_code=400, detail="Tên hoặc ID profile không hợp lệ")
     
     name = data.get("name", "").strip() or profile_id
-    website = data.get("website", "").strip().lower() or "generic"
-    scraper_type = data.get("scraper_type", "").strip().lower() or "web"
+    domain = data.get("domain", "").strip().lower() or data.get("website", "").strip().lower() or "generic"
+    auth_type = data.get("auth_type", "cookie").strip().lower()
     cookie = data.get("cookie", "").strip()
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    login_url = data.get("login_url", "").strip()
+    api_key = data.get("api_key", "").strip()
+    header_name = data.get("header_name", "Authorization").strip() or "Authorization"
+    custom_headers = data.get("custom_headers", "").strip()
     description = data.get("description", "").strip()
 
     vault = load_vault()
     vault[profile_id] = {
         "id": profile_id,
         "name": name,
-        "website": website,
-        "scraper_type": scraper_type,
+        "domain": domain,
+        "website": domain,
+        "auth_type": auth_type,
+        "scraper_type": "web",
         "cookie": cookie,
+        "username": username,
+        "password": password,
+        "login_url": login_url,
+        "api_key": api_key,
+        "header_name": header_name,
+        "custom_headers": custom_headers,
         "description": description,
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
     save_vault(vault)
     return {"status": "ok", "id": profile_id}
 
-@app.delete("/api/cookies/{profile_id}")
-def api_delete_cookie(profile_id: str):
+@app.delete("/api/profiles/{profile_id}")
+def api_delete_profile(profile_id: str):
     vault = load_vault()
     if profile_id in vault:
         del vault[profile_id]
         save_vault(vault)
         return {"status": "ok", "id": profile_id}
-    raise HTTPException(status_code=404, detail="Không tìm thấy bộ cookie này")
+    raise HTTPException(status_code=404, detail="Không tìm thấy profile này")
+
+# Cookie aliases for backward compatibility
+@app.get("/api/cookies")
+def api_get_cookies():
+    return api_get_profiles()
+
+@app.get("/api/cookies/{profile_id}")
+def api_get_cookie_detail(profile_id: str):
+    return api_get_profile_detail(profile_id)
+
+@app.post("/api/cookies")
+async def api_create_or_update_cookie(request: Request):
+    return await api_create_or_update_profile(request)
+
+@app.delete("/api/cookies/{profile_id}")
+def api_delete_cookie(profile_id: str):
+    return api_delete_profile(profile_id)
 
 @app.get("/api/feeds")
 def api_get_feeds():
@@ -282,7 +316,15 @@ async def api_update_settings(request: Request):
 @app.get("/api/refresh/{tag}")
 async def refresh_feed(tag: str):
     clean_tag = sanitize_slug(tag.lstrip("#"))
+    now = datetime.now(timezone.utc).timestamp()
     posts = await asyncio.to_thread(get_feed_posts, clean_tag, True)
+    feeds = load_feeds()
+    if clean_tag in feeds:
+        feeds[clean_tag]["last_scraped_at"] = now
+        feeds[clean_tag]["last_status"] = "success" if posts else "empty"
+        feeds[clean_tag]["last_post_count"] = len(posts)
+        feeds[clean_tag]["total_posts"] = len(posts)
+        save_feeds(feeds)
     return {"status": "ok", "tag": clean_tag, "count": len(posts)}
 
 @app.get("/", response_class=HTMLResponse)
@@ -369,7 +411,7 @@ async def dashboard(request: Request):
             """
 
         feed_cards += f"""
-        <div class="task-card feed-item" data-category="{cat}">
+        <div class="task-card feed-item" data-category="{cat}" data-slug="{slug}" id="feedCard_{slug}">
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
                 <!-- Left: Feed Icon & Meta Info -->
                 <div style="display: flex; align-items: center; gap: 12px; min-width: 260px; flex: 1;">
@@ -460,6 +502,217 @@ async def dashboard(request: Request):
     for c in sorted(categories):
         count_c = sum(1 for m in feeds.values() if m.get("category", "Chung") == c)
         cat_pills += f'<button class="pill" onclick="filterFeeds(\'{c}\', this)"><span>{c}</span><span class="pill-count">{count_c}</span></button>'
+
+    # Time & Profiles calculation
+    now = datetime.now(timezone.utc).timestamp()
+    profiles = get_vault_summary(feeds)
+
+    # 1. Generate Dashboard Table Rows
+    dashboard_table_rows = ""
+    for slug, meta in feeds.items():
+        title = meta.get("title", slug)
+        cat = meta.get("category", "Chung")
+        target = meta.get("target", slug)
+        feed_type = meta.get("type", "web")
+        interval = int(meta.get("interval_minutes") or 30)
+        last_scraped = float(meta.get("last_scraped_at") or 0)
+        
+        posts_for_feed = await asyncio.to_thread(get_feed_posts, slug, False)
+        if not isinstance(posts_for_feed, list):
+            posts_for_feed = list(posts_for_feed.values()) if isinstance(posts_for_feed, dict) else []
+        p_count = len(posts_for_feed)
+
+        # Status badge
+        if last_scraped == 0:
+            status_badge = '<span class="badge" style="background:rgba(255,255,255,0.06); color:var(--text-muted);"><span class="dot"></span> Chưa cào</span>'
+            time_ago = "Chưa cào"
+            next_due = "Sẵn sàng"
+        else:
+            diff = max(0, int(now - last_scraped))
+            if diff < 60: time_ago = "Vừa xong"
+            elif diff < 3600: time_ago = f"{diff // 60}m trước"
+            elif diff < 86400: time_ago = f"{diff // 3600}h trước"
+            else: time_ago = f"{diff // 86400}d trước"
+
+            due_in = int(last_scraped + interval * 60 - now)
+            if due_in <= 0:
+                next_due = '<span style="color:#f59e0b; font-weight:600;">Đến hạn cào</span>'
+            elif due_in < 60:
+                next_due = "Còn <1m"
+            else:
+                next_due = f"Còn ~{due_in // 60}m"
+
+            if p_count > 0:
+                status_badge = f'<span class="badge green" style="font-weight:600;"><span class="dot" style="background:#10b981;"></span> Thành công ({p_count} bài)</span>'
+            else:
+                status_badge = '<span class="badge yellow" style="font-weight:600;"><span class="dot" style="background:#f59e0b;"></span> Trống (0 bài)</span>'
+
+        if feed_type == "web":
+            eng_badge = '<span class="badge blue" style="font-size:0.68rem;">🌐 Web Scraper</span>'
+        elif feed_type == "threads":
+            eng_badge = '<span class="badge purple" style="background:rgba(168,85,247,0.15); color:#c084fc; font-size:0.68rem;">🧵 Threads</span>'
+        elif feed_type == "rsshub":
+            eng_badge = '<span class="badge cyan" style="font-size:0.68rem;">🚀 RSSHub</span>'
+        else:
+            eng_badge = '<span class="badge amber" style="font-size:0.68rem;">📡 External RSS</span>'
+
+        c_mode = meta.get("cookie_mode", "none")
+        c_prof = meta.get("cookie_profile", "")
+        if c_mode == "profile" and c_prof:
+            prof_obj = next((p for p in profiles if p["id"] == c_prof), None)
+            dom_txt = prof_obj.get("domain", "") if prof_obj else ""
+            label_txt = f"[{dom_txt}] {c_prof}" if dom_txt else c_prof
+            auth_badge = f'<span class="badge" style="background:rgba(14,165,233,0.12); color:#38bdf8; font-size:0.68rem;" title="Profile: {c_prof}">📂 {label_txt}</span>'
+        elif c_mode == "custom":
+            auth_badge = '<span class="badge" style="background:rgba(245,158,11,0.12); color:#fbbf24; font-size:0.68rem;">✏️ Custom Cookie</span>'
+        else:
+            auth_badge = '<span class="badge" style="background:rgba(255,255,255,0.05); color:var(--text-dim); font-size:0.68rem;">Guest</span>'
+
+        safe_title = title.replace("'", "\\'").replace('"', '&quot;')
+        truncated_target = target if len(target) <= 45 else target[:42] + "..."
+
+        dashboard_table_rows += f"""
+        <tr class="dashboard-row" data-slug="{slug}" data-category="{cat}">
+            <td>
+                <div style="font-weight: 700; color: #fff; font-size: 0.84rem; display: flex; align-items: center; gap: 6px;">
+                    <span>{title}</span>
+                    <span class="badge gray" style="font-size: 0.65rem;">{cat}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                    <span style="font-family: var(--mono); font-size: 0.7rem; color: var(--text-dim);">/{slug}</span>
+                    <div style="display: inline-flex; gap: 4px;">
+                        <a href="{BASE_URL}/{slug}.xml" target="_blank" class="format-btn xml" style="height: 20px; padding: 0 6px; font-size: 0.65rem;">XML</a>
+                        <a href="{BASE_URL}/{slug}.json" target="_blank" class="format-btn json" style="height: 20px; padding: 0 6px; font-size: 0.65rem;">JSON</a>
+                        <a href="{BASE_URL}/{slug}.atom" target="_blank" class="format-btn atom" style="height: 20px; padding: 0 6px; font-size: 0.65rem;">ATOM</a>
+                    </div>
+                </div>
+            </td>
+            <td>
+                <div>{eng_badge}</div>
+                <div style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--mono); margin-top: 4px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{target}">
+                    {truncated_target}
+                </div>
+            </td>
+            <td>
+                <div>{status_badge}</div>
+                <div style="font-size: 0.68rem; color: var(--text-dim); margin-top: 3px;">
+                    Lần cào: <strong style="color: var(--text-muted);">{time_ago}</strong>
+                </div>
+            </td>
+            <td>
+                <button type="button" class="badge" onclick="openFeedIntervalModal('{slug}', '{safe_title}', {interval})" style="cursor: pointer; padding: 2px 7px; font-size: 0.68rem; background: rgba(168, 85, 247, 0.14); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 5px;" title="Bấm để đổi chu kỳ cào">
+                    ⏱️ {interval}m ⚙️
+                </button>
+                <div style="font-size: 0.68rem; color: var(--text-dim); margin-top: 3px;">
+                    Kế tiếp: {next_due}
+                </div>
+            </td>
+            <td>
+                {auth_badge}
+            </td>
+            <td style="text-align: right;">
+                <div style="display: inline-flex; align-items: center; gap: 6px;">
+                    <button class="btn primary" onclick="refreshFeed('{slug}', this)" title="Cào mới dữ liệu ngay" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                        <span>Cào</span>
+                    </button>
+                    <button class="btn" onclick="viewFeedInScrapers('{slug}')" id="btnDashPreview_{slug}" title="Xem trước bài viết vừa cào" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">
+                        <span>Xem</span>
+                    </button>
+                    <button class="btn" onclick="editFeedModal('{slug}')" title="Cấu hình scraper này" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">
+                        <span>Cấu hình</span>
+                    </button>
+                </div>
+            </td>
+        </tr>
+        """
+
+    # 2. Domain groups for Profiles Tab
+    domain_groups = {}
+    for p in profiles:
+        dom = p.get("domain", "generic")
+        domain_groups.setdefault(dom, []).append(p)
+
+    domain_pills = f'<button class="pill active" onclick="filterProfiles(\'all\', this)"><span>Tất cả Domain</span><span class="pill-count">{len(profiles)}</span></button>'
+    for dom in sorted(domain_groups.keys()):
+        p_list = domain_groups[dom]
+        domain_pills += f'<button class="pill" onclick="filterProfiles(\'{dom}\', this)"><span>{dom}</span><span class="pill-count">{len(p_list)}</span></button>'
+
+    profiles_html = ""
+    if not profiles:
+        profiles_html = '''<div style="text-align: center; padding: 48px 20px; background: var(--card-bg); border: 1px dashed var(--card-border); border-radius: 16px;">
+            <div style="font-size: 2.2rem; margin-bottom: 10px;">🔐</div>
+            <div style="font-weight: 700; font-size: 1rem; color: #fff; margin-bottom: 6px;">Chưa có Profile xác thực nào</div>
+            <div style="font-size: 0.78rem; color: var(--text-dim); max-width: 440px; margin: 0 auto 16px;">Tạo profile theo domain để quản lý cookie, tài khoản login hoặc API key dùng chung cho các scraper.</div>
+            <button class="btn primary" onclick="openAddProfileModal()">+ Thêm Profile Đầu Tiên</button>
+        </div>'''
+    else:
+        for dom in sorted(domain_groups.keys()):
+            p_list = domain_groups[dom]
+            profiles_html += f"""
+            <div class="domain-group-section" data-domain="{dom}" style="margin-bottom: 24px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.06);">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 0.88rem; font-weight: 700; color: #38bdf8;">🌐 {dom}</span>
+                        <span class="badge gray" style="font-size: 0.68rem;">{len(p_list)} profile</span>
+                    </div>
+                    <button class="btn" onclick="openAddProfileForDomain('{dom}')" style="height: 26px; padding: 0 8px; font-size: 0.7rem;">+ Thêm vào domain này</button>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px;">
+            """
+            for p in p_list:
+                p_id = p["id"]
+                p_name = p["name"]
+                auth_type = p.get("auth_type", "cookie")
+                if auth_type == "cookie":
+                    auth_badge = '<span class="badge amber" style="font-size: 0.68rem;">🍪 Session Cookie</span>'
+                elif auth_type == "login":
+                    auth_badge = '<span class="badge blue" style="font-size: 0.68rem;">👤 Login (User/Pass)</span>'
+                elif auth_type == "api_key":
+                    auth_badge = '<span class="badge green" style="font-size: 0.68rem;">🔑 API Key</span>'
+                else:
+                    auth_badge = '<span class="badge gray" style="font-size: 0.68rem;">⚙️ Custom Headers</span>'
+
+                used_feeds = p.get("used_by", [])
+                if used_feeds:
+                    used_html = '<span style="color:#34d399; font-size:0.7rem;">Áp dụng: <strong>' + ", ".join(used_feeds) + '</strong></span>'
+                else:
+                    used_html = '<span style="color:var(--text-dim); font-size:0.7rem;">Chưa gắn scraper nào</span>'
+
+                desc_html = f'<div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 6px; line-height: 1.4;">{p.get("description")}</div>' if p.get("description") else ""
+
+                profiles_html += f"""
+                    <div class="task-card profile-item" data-domain="{dom}" style="padding: 14px; margin: 0; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px;">
+                                <div>
+                                    <div style="font-weight: 700; font-size: 0.88rem; color: #fff;">{p_name}</div>
+                                    <div style="font-size: 0.68rem; color: var(--text-dim); font-family: var(--mono);">{p_id}</div>
+                                </div>
+                                {auth_badge}
+                            </div>
+                            <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 6px 10px; font-family: var(--mono); font-size: 0.72rem; color: #cbd5e1; word-break: break-all; margin-bottom: 8px;">
+                                <code>{p["masked"]}</code>
+                            </div>
+                            <div style="margin-bottom: 6px;">
+                                {used_html}
+                            </div>
+                            {desc_html}
+                        </div>
+                        <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 12px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
+                            <button class="btn" onclick="copyProfileCredential('{p_id}')" title="Sao chép thông tin xác thực" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">
+                                <span>📋 Copy</span>
+                            </button>
+                            <button class="btn" onclick="openEditProfileModal('{p_id}')" title="Sửa profile này" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">
+                                <span>Sửa</span>
+                            </button>
+                            <button class="btn danger" onclick="deleteProfileModal('{p_id}')" title="Xóa profile này" style="height: 28px; padding: 0 8px; font-size: 0.72rem;">
+                                <span>Xóa</span>
+                            </button>
+                        </div>
+                    </div>
+                """
+            profiles_html += '</div></div>'
 
     html_content = f"""<!DOCTYPE html>
 <html lang="vi">
@@ -1214,8 +1467,91 @@ async def dashboard(request: Request):
       .footer-stat-chip.clickable:hover {{
         transform: translateY(-1px);
         box-shadow: 0 4px 12px rgba(245, 158, 11, 0.35);
-        filter: brightness(1.15);
-      }}
+    /* Main Tabs Styling */
+    .main-tab-content {{
+      animation: tabFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }}
+    @keyframes tabFadeIn {{
+      from {{ opacity: 0; transform: translateY(5px); }}
+      to {{ opacity: 1; transform: translateY(0); }}
+    }}
+
+    /* Table Styles */
+    .table-card {{
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      overflow: hidden;
+      backdrop-filter: blur(12px);
+    }}
+    .table-responsive {{
+      overflow-x: auto;
+      width: 100%;
+    }}
+    .data-table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+      text-align: left;
+    }}
+    .data-table th {{
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border-bottom: 1px solid var(--card-border);
+      color: var(--text-dim);
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }}
+    .data-table td {{
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      vertical-align: middle;
+    }}
+    .data-table tr:hover td {{
+      background: rgba(255, 255, 255, 0.02);
+    }}
+    .data-table tr:last-child td {{
+      border-bottom: none;
+    }}
+
+    /* Quick KPI Bar */
+    .kpi-strip {{
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }}
+    .kpi-box {{
+      background: rgba(15, 23, 42, 0.65);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }}
+    .kpi-icon {{
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }}
+    .kpi-icon svg {{ width: 17px; height: 17px; }}
+    .kpi-info .kpi-label {{ font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }}
+    .kpi-info .kpi-val {{ font-size: 1.1rem; font-weight: 700; color: #fff; line-height: 1.2; }}
+
+    @media (max-width: 900px) {{
+      .kpi-strip {{ grid-template-columns: repeat(2, 1fr); }}
+    }}
+    @media (max-width: 600px) {{
+      .kpi-strip {{ grid-template-columns: 1fr; }}
     }}
   </style>
 </head>
@@ -1241,28 +1577,25 @@ async def dashboard(request: Request):
       <button class="mobile-close-btn" onclick="toggleSidebar(false)">✕</button>
     </div>
 
-    <!-- Navigation items -->
+    <!-- Navigation items (TABS) -->
     <nav class="sidebar-nav">
-      <div class="nav-section-title">ĐIỀU HƯỚNG FEEDS</div>
-      <a href="/" class="nav-item active">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/></svg>
-        <span>Danh sách Feeds</span>
-      </a>
-      <button class="nav-item" onclick="openAddFeedModal()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        <span>Thêm kênh mới</span>
+      <div class="nav-section-title">HỆ THỐNG</div>
+      <button class="nav-item active" id="navItem_dashboard" onclick="switchMainTab('dashboard')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+        <span>Dashboard</span>
+        <span class="badge blue" style="margin-left: auto; font-size: 0.65rem; padding: 1px 6px;">Live</span>
       </button>
-      <button class="nav-item" onclick="openCookieVaultModal()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-1.5 1.5L14 9l-1.5-1.5L11 9l-1.5-1.5L8 9l-1.5-1.5-4 4a5 5 0 0 0 7 7l4-4 1.5 1.5L16 15l1.5-1.5L19 15l1.5-1.5 2-2"/></svg>
-        <span>Kho Cookie Vault</span>
+
+      <button class="nav-item" id="navItem_scrapers" onclick="switchMainTab('scrapers')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="19" r="1.5"/><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/></svg>
+        <span>Quản lý Scraper</span>
+        <span class="badge gray" style="margin-left: auto; font-size: 0.65rem; padding: 1px 6px;">{len(feeds)}</span>
       </button>
-      <button class="nav-item" onclick="openAllIntervalsModal()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        <span>Lịch cào từng kênh</span>
-      </button>
-      <button class="nav-item" onclick="refreshAllFeeds()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-        <span>Cào mới tất cả</span>
+
+      <button class="nav-item" id="navItem_profiles" onclick="switchMainTab('profiles')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Quản lý Profile</span>
+        <span class="badge violet" style="margin-left: auto; font-size: 0.65rem; padding: 1px 6px;">{len(profiles)}</span>
       </button>
     </nav>
 
@@ -1284,11 +1617,11 @@ async def dashboard(request: Request):
     <header class="topbar-header">
       <div style="display: flex; align-items: center; gap: 12px; min-width: 0; flex-wrap: wrap;">
         <button class="hamburger-btn" onclick="toggleSidebar(true)">☰</button>
-        <h1 class="page-title" style="margin: 0; white-space: nowrap;">Quản lý Feeds &amp; Cấu hình Nguồn</h1>
+        <h1 class="page-title" id="mainPageTitle" style="margin: 0; white-space: nowrap;">Dashboard &amp; Giám sát Lượt cào</h1>
         <div style="display: flex; align-items: center; gap: 6px;">
           <span style="background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 999px; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; display: inline-flex; align-items: center; gap: 4px;" title="Tổng số kênh Feed">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 11px; height: 11px;"><circle cx="5" cy="19" r="1.5"/><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/></svg>
-            <span>{len(feeds)} Kênh</span>
+            <span>{len(feeds)} Scrapers</span>
           </span>
           <span style="background: rgba(16, 185, 129, 0.12); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 999px; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; display: inline-flex; align-items: center; gap: 4px;" title="Tổng số bài viết đã cào">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 11px; height: 11px;"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
@@ -1301,44 +1634,165 @@ async def dashboard(request: Request):
         </div>
       </div>
 
+      <!-- Action buttons dynamically shown per tab -->
       <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
-        <button class="btn" onclick="openAllIntervalsModal()" title="Xem và điều chỉnh lịch cào của từng Scraper" style="height: 32px; font-size: 0.76rem;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          <span>Tần suất cào</span>
-        </button>
-        <button class="btn" onclick="openCookieVaultModal()" title="Quản lý Kho Cookie theo Trang web &amp; Scraper" style="height: 32px; font-size: 0.76rem;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px;"><path d="M21 2l-2 2m-1.5 1.5L14 9l-1.5-1.5L11 9l-1.5-1.5L8 9l-1.5-1.5-4 4a5 5 0 0 0 7 7l4-4 1.5 1.5L16 15l1.5-1.5L19 15l1.5-1.5 2-2"/></svg>
-          <span>Kho Cookie</span>
-        </button>
-        <button class="btn primary" onclick="openAddFeedModal()" style="height: 32px; font-size: 0.76rem;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 15px; height: 15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          <span>Thêm kênh Feed</span>
-        </button>
-        <button id="btnRefreshTop" class="btn" onclick="refreshAllFeeds()" style="height: 32px; font-size: 0.76rem;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 15px; height: 15px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span>Làm mới</span>
-        </button>
+        <!-- Dashboard Actions -->
+        <div id="topbarActions_dashboard" style="display: flex; align-items: center; gap: 8px;">
+          <button class="btn" onclick="openAllIntervalsModal()" title="Xem lịch cào riêng của các Scraper" style="height: 32px; font-size: 0.76rem;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>Lịch cào</span>
+          </button>
+          <button class="btn primary" onclick="refreshAllFeeds()" title="Cào mới tất cả các scraper ngay" style="height: 32px; font-size: 0.76rem;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            <span>Cào mới tất cả</span>
+          </button>
+        </div>
+
+        <!-- Scrapers Actions -->
+        <div id="topbarActions_scrapers" style="display: none; align-items: center; gap: 8px;">
+          <button class="btn" onclick="openAllIntervalsModal()" title="Xem lịch cào riêng của các Scraper" style="height: 32px; font-size: 0.76rem;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>Tần suất cào</span>
+          </button>
+          <button class="btn primary" onclick="openAddFeedModal()" style="height: 32px; font-size: 0.76rem;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>+ Thêm kênh Feed</span>
+          </button>
+        </div>
+
+        <!-- Profiles Actions -->
+        <div id="topbarActions_profiles" style="display: none; align-items: center; gap: 8px;">
+          <button class="btn primary" onclick="openAddProfileModal()" style="height: 32px; font-size: 0.76rem;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>+ Thêm Profile mới</span>
+          </button>
+        </div>
       </div>
     </header>
 
     <main>
-      <!-- Controls Bar & Filter Pills -->
-      <div class="controls-bar" style="margin-bottom: 14px; margin-top: 4px;">
-        <div class="filter-pills">
-          {cat_pills}
+      <!-- TAB 1: DASHBOARD (Table kết quả các lượt cào của các scraper đã cấu hình) -->
+      <div id="view_dashboard" class="main-tab-content">
+        <!-- Quick KPI Strip -->
+        <div class="kpi-strip">
+          <div class="kpi-box">
+            <div class="kpi-icon" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="19" r="1.5"/><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/></svg>
+            </div>
+            <div class="kpi-info">
+              <div class="kpi-label">Scrapers Đang Chạy</div>
+              <div class="kpi-val">{len(feeds)} Kênh</div>
+            </div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-icon" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+            </div>
+            <div class="kpi-info">
+              <div class="kpi-label">Bài Viết Đã Cào</div>
+              <div class="kpi-val">{total_posts} Bài</div>
+            </div>
+          </div>
+          <div class="kpi-box clickable" onclick="openAllIntervalsModal()" style="cursor: pointer;" title="Bấm để xem và sửa lịch cào">
+            <div class="kpi-icon" style="background: rgba(168, 85, 247, 0.15); color: #c084fc;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div class="kpi-info">
+              <div class="kpi-label">Lịch Cào Ngầm ⚙️</div>
+              <div class="kpi-val">Độc lập từng kênh</div>
+            </div>
+          </div>
+          <div class="kpi-box clickable" onclick="switchMainTab('profiles')" style="cursor: pointer;" title="Bấm để chuyển sang Quản lý Profile">
+            <div class="kpi-icon" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <div class="kpi-info">
+              <div class="kpi-label">Kho Profile 🌐</div>
+              <div class="kpi-val">{len(profiles)} Profiles</div>
+            </div>
+          </div>
         </div>
 
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <button class="btn primary" onclick="openAddFeedModal()" title="Thêm nguồn RSS mới" style="height: 30px; font-size: 0.74rem;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            <span>+ Kênh mới</span>
-          </button>
+        <!-- Scraper Execution Table Card -->
+        <div class="table-card">
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--card-border); gap: 10px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 0.88rem; font-weight: 700; color: #fff;">📊 Bảng Kết quả Lượt cào của các Scraper</span>
+              <span class="badge blue" style="font-size: 0.68rem;">{len(feeds)} Scrapers</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <input type="text" class="form-input" placeholder="🔍 Lọc theo tên, slug, domain..." style="height: 30px; font-size: 0.74rem; width: 190px;" oninput="filterDashboardTable(this.value)">
+              <button class="btn primary" onclick="refreshAllFeeds()" style="height: 30px; font-size: 0.74rem;" title="Cào mới tất cả các scraper ngay">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                <span>Cào tất cả</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table" id="dashboardTable">
+              <thead>
+                <tr>
+                  <th>Scraper / Kênh</th>
+                  <th>Loại Engine &amp; Mục tiêu</th>
+                  <th>Trạng thái cào</th>
+                  <th>Tần suất</th>
+                  <th>Profile áp dụng</th>
+                  <th style="text-align: right;">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dashboard_table_rows if dashboard_table_rows else '<tr><td colspan="6" style="text-align:center; padding:32px; color:var(--text-dim);">Chưa có Scraper nào được cấu hình.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      <!-- Task / Feeds List -->
-      <div id="viewFeeds" class="task-list">
-        {feed_cards if feed_cards else '<div style="text-align:center; padding:40px; color:var(--text-dim);">Chưa có kênh feed nào. Bấm "+ Thêm kênh Feed" để bắt đầu!</div>'}
+      <!-- TAB 2: QUẢN LÝ SCRAPER (Xem, edit, xoá, add) -->
+      <div id="view_scrapers" class="main-tab-content" style="display: none;">
+        <!-- Controls Bar & Filter Pills -->
+        <div class="controls-bar" style="margin-bottom: 14px; margin-top: 4px;">
+          <div class="filter-pills">
+            {cat_pills}
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="text" class="form-input" placeholder="🔍 Lọc scraper..." style="height: 30px; font-size: 0.74rem; width: 170px;" oninput="filterScrapersBySearch(this.value)">
+            <button class="btn primary" onclick="openAddFeedModal()" title="Thêm nguồn RSS mới" style="height: 30px; font-size: 0.74rem;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <span>+ Thêm Scraper</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Task / Feeds List -->
+        <div id="viewFeeds" class="task-list">
+          {feed_cards if feed_cards else '<div style="text-align:center; padding:40px; color:var(--text-dim);">Chưa có kênh feed nào. Bấm "+ Thêm Scraper" để bắt đầu!</div>'}
+        </div>
+      </div>
+
+      <!-- TAB 3: QUẢN LÝ PROFILE (Domain, username/password, api key, session cookie) -->
+      <div id="view_profiles" class="main-tab-content" style="display: none;">
+        <!-- Controls Bar & Domain Pills -->
+        <div class="controls-bar" style="margin-bottom: 14px; margin-top: 4px;">
+          <div class="filter-pills" id="domainFilterPills">
+            {domain_pills}
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="text" class="form-input" placeholder="🔍 Lọc domain, profile..." style="height: 30px; font-size: 0.74rem; width: 170px;" oninput="filterProfilesBySearch(this.value)">
+            <button class="btn primary" onclick="openAddProfileModal()" title="Thêm profile xác thực mới" style="height: 30px; font-size: 0.74rem;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <span>+ Thêm Profile</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Profiles List Grouped by Domain -->
+        <div id="viewProfilesList">
+          {profiles_html}
+        </div>
       </div>
     </main>
 
@@ -1601,71 +2055,101 @@ async def dashboard(request: Request):
     </div>
   </div>
 
-  <!-- MODAL: COOKIE VAULT MANAGEMENT -->
-  <div id="modalCookieVault" class="modal-overlay" onclick="handleModalClick(event, 'modalCookieVault')">
-    <div class="modal-card" style="width: min(680px, 100%);">
+  <!-- MODAL: ADD / EDIT PROFILE (DOMAIN & CREDENTIALS) -->
+  <div id="modalProfileEdit" class="modal-overlay" onclick="handleModalClick(event, 'modalProfileEdit')">
+    <div class="modal-card" style="width: min(620px, 100%);">
       <div class="modal-head">
         <div>
-          <h2 class="modal-title">Quản lý Cookie theo Trang web &amp; Scraper</h2>
-          <div style="font-size:0.75rem; color:var(--text-dim); margin-top:2px;">Thêm và quản lý Cookie xác thực phân loại theo từng trang web/domain để các Scraper tái sử dụng linh hoạt.</div>
+          <h2 class="modal-title" id="lblProfileModalTitle">Thêm Profile Xác thực Mới</h2>
+          <div style="font-size:0.75rem; color:var(--text-dim); margin-top:2px;">Quản lý xác thực theo từng Domain (Session Cookie, Tài khoản login, hoặc API Key).</div>
         </div>
-        <button class="modal-close" onclick="closeModal('modalCookieVault')">✕</button>
+        <button class="modal-close" onclick="closeModal('modalProfileEdit')">✕</button>
       </div>
 
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-        <span style="font-size:0.75rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em;">Danh sách Cookie theo Trang web</span>
-        <button class="btn primary" onclick="showAddCookieForm(true)" style="height:32px; font-size:0.75rem;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px; height:13px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          <span>Thêm Cookie mới</span>
-        </button>
-      </div>
+      <form id="formProfileEdit" onsubmit="handleSaveProfile(event)">
+        <input type="hidden" id="editProfileId" value="">
 
-      <!-- Add/Edit Cookie Form -->
-      <div id="boxAddCookie" style="display:none; background:rgba(7, 12, 24, 0.85); border:1px solid var(--primary-glow); border-radius:14px; padding:16px; margin-bottom:16px;">
-        <div id="lblFormCookieTitle" style="font-size:0.85rem; font-weight:700; color:#fff; margin-bottom:10px;">Thêm Cookie cho Trang web</div>
-        <form onsubmit="handleSaveVaultCookie(event)">
-          <input type="hidden" id="editCookieId" value="">
+        <!-- Domain & Name -->
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:12px;">
+          <div>
+            <label class="form-label">Domain / Trang web *</label>
+            <input type="text" id="profDomain" class="form-input" required placeholder="vd: threads.net, voz.vn, tuoitre.vn">
+            <div class="form-hint">vd: threads.net, voz.vn, reddit.com</div>
+          </div>
+          <div>
+            <label class="form-label">Tên Profile định danh *</label>
+            <input type="text" id="profName" class="form-input" required placeholder="vd: Voz VIP Member, Acc Threads 1">
+            <div class="form-hint">Tên gợi nhớ cho bộ profile này</div>
+          </div>
+        </div>
+
+        <!-- Auth Method Selector -->
+        <div class="form-group" style="margin-bottom:12px;">
+          <label class="form-label">Phương thức Xác thực (Auth Method) *</label>
+          <select id="profAuthType" class="form-select" onchange="handleAuthTypeChange(this.value)" style="font-weight:600; font-size:0.85rem;">
+            <option value="cookie" selected>🍪 Session Cookie (Khuyên dùng cho Web Scraper / Threads)</option>
+            <option value="login">👤 Đăng nhập bằng Tài khoản &amp; Mật khẩu (Username / Password)</option>
+            <option value="api_key">🔑 API Key / Bearer Token / Secret Header</option>
+            <option value="custom_header">⚙️ Custom HTTP Headers (Định dạng JSON)</option>
+          </select>
+        </div>
+
+        <!-- Method 1: Cookie -->
+        <div id="groupAuthCookie" class="form-group" style="margin-bottom:12px;">
+          <label class="form-label">Chuỗi Cookie xác thực *</label>
+          <textarea id="profCookie" class="form-textarea" rows="3" placeholder="vd: sessionid=xyz...; token=abc...; hoặc dán mảng JSON từ extension Cookie-Editor" style="font-family:var(--mono); font-size:0.75rem;"></textarea>
+          <div class="form-hint">Có thể dán chuỗi cookie thô dạng `name=val; name2=val2` hoặc JSON export từ trình duyệt.</div>
+        </div>
+
+        <!-- Method 2: Login Username/Password -->
+        <div id="groupAuthLogin" style="display:none; background:rgba(7, 12, 24, 0.7); border:1px solid var(--card-border); border-radius:12px; padding:14px; margin-bottom:14px;">
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
             <div>
-              <label class="form-label">Tên cấu hình *</label>
-              <input type="text" id="newVaultName" class="form-input" required placeholder="vd: Threads Acc 1, Voz VIP, Báo Tuổi Trẻ">
+              <label class="form-label">Tên đăng nhập / Email *</label>
+              <input type="text" id="profUsername" class="form-input" placeholder="user@example.com hoặc username">
             </div>
             <div>
-              <label class="form-label">Trang web / Domain áp dụng *</label>
-              <input type="text" id="newVaultWebsite" class="form-input" required placeholder="vd: threads.net, voz.vn, tuoitre.vn">
+              <label class="form-label">Mật khẩu (Password) *</label>
+              <input type="password" id="profPassword" class="form-input" placeholder="••••••••••••">
             </div>
           </div>
-          <div class="form-group" style="margin-bottom:10px;">
-            <label class="form-label">Loại Scraper tương thích</label>
-            <select id="newVaultScraperType" class="form-select">
-              <option value="threads">Threads Scraper</option>
-              <option value="web">Web / RSS Scraper thông thường</option>
-              <option value="rsshub">RSSHub Upstream</option>
-            </select>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">URL Trang đăng nhập (Tùy chọn)</label>
+            <input type="text" id="profLoginUrl" class="form-input" placeholder="vd: https://voz.vn/login/">
           </div>
-          <div class="form-group" style="margin-bottom:10px;">
-            <label class="form-label">Chuỗi Cookie xác thực *</label>
-            <textarea id="newVaultCookie" class="form-textarea" required rows="2" placeholder="sessionid=...; token=...; hoặc dán JSON từ Cookie-Editor" style="font-family:var(--mono); font-size:0.75rem;"></textarea>
-          </div>
-          <div class="form-group" style="margin-bottom:12px;">
-            <label class="form-label">Ghi chú (Tùy chọn)</label>
-            <input type="text" id="newVaultDesc" class="form-input" placeholder="vd: Tài khoản đọc báo trả phí, nhóm kín...">
-          </div>
-          <div style="display:flex; justify-content:flex-end; gap:8px;">
-            <button type="button" class="btn" onclick="showAddCookieForm(false)" style="height:32px; font-size:0.75rem;">Hủy</button>
-            <button type="submit" class="btn primary" style="height:32px; font-size:0.75rem;">Lưu Cookie</button>
-          </div>
-        </form>
-      </div>
+        </div>
 
-      <!-- Cookie Vault List -->
-      <div id="vaultList" style="display:flex; flex-direction:column; gap:10px;">
-        <div style="text-align:center; padding:20px; color:var(--text-dim); font-size:0.8rem;">Đang tải danh sách Cookie...</div>
-      </div>
+        <!-- Method 3: API Key -->
+        <div id="groupAuthApiKey" style="display:none; background:rgba(7, 12, 24, 0.7); border:1px solid var(--card-border); border-radius:12px; padding:14px; margin-bottom:14px;">
+          <div style="display:grid; grid-template-columns: 1fr 2fr; gap:10px; margin-bottom:0;">
+            <div>
+              <label class="form-label">Tên Header</label>
+              <input type="text" id="profHeaderName" class="form-input" value="Authorization" placeholder="vd: Authorization, X-Api-Key">
+            </div>
+            <div>
+              <label class="form-label">Giá trị API Key / Token *</label>
+              <input type="text" id="profApiKey" class="form-input" placeholder="vd: Bearer sk-..." style="font-family:var(--mono); font-size:0.78rem;">
+            </div>
+          </div>
+        </div>
 
-      <div style="display:flex; justify-content:flex-end; margin-top:20px; padding-top:14px; border-top:1px solid var(--card-border);">
-        <button class="btn" onclick="closeModal('modalCookieVault')">Đóng</button>
-      </div>
+        <!-- Method 4: Custom Headers -->
+        <div id="groupAuthHeaders" class="form-group" style="display:none; margin-bottom:12px;">
+          <label class="form-label">Custom HTTP Headers (JSON format)</label>
+          <textarea id="profCustomHeaders" class="form-textarea" rows="3" placeholder='{{"User-Agent": "...", "X-Custom-Auth": "..."}}' style="font-family:var(--mono); font-size:0.75rem;"></textarea>
+        </div>
+
+        <!-- Description -->
+        <div class="form-group" style="margin-bottom:16px;">
+          <label class="form-label">Ghi chú / Mô tả (Tùy chọn)</label>
+          <input type="text" id="profDesc" class="form-input" placeholder="Ghi chú về tài khoản, thời hạn cookie, mục đích sử dụng...">
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; padding-top:14px; border-top:1px solid var(--card-border);">
+          <button type="button" class="btn" onclick="closeModal('modalProfileEdit')" style="height:32px; font-size:0.76rem;">Hủy</button>
+          <button type="submit" class="btn primary" id="btnSubmitProfile" style="height:32px; font-size:0.76rem;">Lưu Profile</button>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -1831,6 +2315,18 @@ async def dashboard(request: Request):
         drawer.style.display = 'none';
         if (chevron) chevron.style.transform = 'rotate(0deg)';
       }}
+    }}
+
+    function viewFeedInScrapers(slug) {{
+      switchMainTab('scrapers');
+      setTimeout(() => {{
+        const card = document.getElementById('feedCard_' + slug);
+        if (card) card.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+        const drawer = document.getElementById('drawerPreview_' + slug);
+        if (drawer && (drawer.style.display === 'none' || drawer.style.display === '')) {{
+          toggleFeedPreview(slug);
+        }}
+      }}, 120);
     }}
 
     function openAddFeedModal() {{
@@ -2080,158 +2576,220 @@ async def dashboard(request: Request):
     }}
 
     function populateProfileDropdown() {{
-      fetch('/api/cookies')
+      fetch('/api/profiles')
         .then(r => r.json())
         .then(profiles => {{
           const sel = document.getElementById('feedCookieProfile');
+          if (!sel) return;
           sel.innerHTML = '';
           if (!profiles || profiles.length === 0) {{
-            sel.innerHTML = '<option value="">(Chưa có bộ cookie nào trong kho - Bấm "Quản lý Kho Cookie" để thêm)</option>';
+            sel.innerHTML = '<option value="">(Chưa có Profile nào - Bấm tab "Quản lý Profile" để thêm)</option>';
             return;
           }}
           profiles.forEach(p => {{
             const opt = document.createElement('option');
             opt.value = p.id;
-            opt.innerText = '[' + (p.website || 'web') + '] ' + p.name + ' (' + p.masked + ')';
+            const dom = p.domain || p.website || 'web';
+            const auth = p.auth_type ? (' - ' + p.auth_type) : '';
+            opt.innerText = '[' + dom + '] ' + p.name + auth + ' (' + p.masked + ')';
             sel.appendChild(opt);
           }});
-        }});
-    }}
-
-    function openCookieVaultModal() {{
-      openModal('modalCookieVault');
-      renderCookieVault();
-    }}
-
-    function showAddCookieForm(show, profile = null) {{
-      const box = document.getElementById('boxAddCookie');
-      box.style.display = show ? 'block' : 'none';
-      const title = document.getElementById('lblFormCookieTitle');
-      const inpId = document.getElementById('editCookieId');
-      const inpName = document.getElementById('newVaultName');
-      const inpWeb = document.getElementById('newVaultWebsite');
-      const selType = document.getElementById('newVaultScraperType');
-      const txtCookie = document.getElementById('newVaultCookie');
-      const inpDesc = document.getElementById('newVaultDesc');
-
-      if (profile) {{
-        title.innerText = 'Chỉnh sửa Cookie: ' + profile.name;
-        inpId.value = profile.id;
-        inpName.value = profile.name;
-        inpWeb.value = profile.website || '';
-        selType.value = profile.scraper_type || 'web';
-        inpDesc.value = profile.description || '';
-        txtCookie.value = '';
-        txtCookie.placeholder = '(Giữ nguyên cookie hiện tại hoặc dán cookie mới...)';
-        txtCookie.required = false;
-      }} else {{
-        title.innerText = 'Thêm Cookie cho Trang web';
-        inpId.value = '';
-        inpName.value = '';
-        inpWeb.value = '';
-        selType.value = 'web';
-        txtCookie.value = '';
-        txtCookie.placeholder = 'sessionid=...; token=...; hoặc dán JSON từ Cookie-Editor';
-        txtCookie.required = true;
-        inpDesc.value = '';
-      }}
-    }}
-
-    function renderCookieVault() {{
-      const box = document.getElementById('vaultList');
-      box.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-dim); font-size:0.8rem;">Đang nạp Kho Cookie...</div>';
-
-      fetch('/api/cookies')
-        .then(r => r.json())
-        .then(profiles => {{
-          if (!profiles || profiles.length === 0) {{
-            box.innerHTML = '<div style="text-align:center; padding:24px; color:var(--text-dim); font-size:0.8rem; background:rgba(15,23,42,0.4); border-radius:12px; border:1px dashed var(--card-border);">Kho cookie hiện đang trống. Hãy bấm "+ Thêm Cookie mới" để thêm cookie cho từng trang web.</div>';
-            return;
-          }}
-          let html = '';
-          profiles.forEach(p => {{
-            const websiteBadge = `<span style="font-size:0.68rem; font-weight:700; padding:2px 7px; border-radius:4px; background:rgba(14,165,233,0.15); color:#38bdf8; border:1px solid rgba(14,165,233,0.3);">🌐 ${{p.website}}</span>`;
-            const scraperBadge = `<span style="font-size:0.65rem; font-weight:600; padding:2px 6px; border-radius:4px; background:rgba(255,255,255,0.06); color:var(--text-muted); text-transform:uppercase;">${{p.scraper_type}}</span>`;
-
-            html += `
-            <div style="background:rgba(15, 23, 42, 0.7); border:1px solid var(--card-border); border-radius:12px; padding:12px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; transition:border-color 0.2s;">
-              <div style="min-width:0; flex:1;">
-                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                  <span style="font-weight:700; font-size:0.9rem; color:#fff;">${{p.name}}</span>
-                  ${{websiteBadge}}
-                  ${{scraperBadge}}
-                </div>
-                <div style="font-family:var(--mono); font-size:0.75rem; color:#cbd5e1; margin-top:4px;">
-                  Cookie: <span style="color:#38bdf8;">${{p.masked}}</span>
-                </div>
-                <div style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">
-                  ${{p.description || 'Không có mô tả'}}
-                </div>
-              </div>
-              <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-                <button class="btn" onclick="editCookiePrompt('${{p.id}}')" style="height:30px; padding:0 10px; font-size:0.74rem;">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px; height:13px;"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                  <span>Sửa</span>
-                </button>
-                <button class="btn danger" onclick="deleteVaultCookie('${{p.id}}')" style="height:30px; padding:0 10px; font-size:0.74rem;">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px; height:13px;"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                  <span>Xóa</span>
-                </button>
-              </div>
-            </div>
-            `;
-          }});
-          box.innerHTML = html;
         }})
-        .catch(e => {{
-          box.innerHTML = '<div style="color:#fb7185; padding:10px; font-size:0.8rem;">Lỗi tải kho cookie: ' + e + '</div>';
-        }});
+        .catch(err => console.error('Error loading profiles:', err));
     }}
 
-    function editCookiePrompt(profileId) {{
-      fetch('/api/cookies/' + profileId)
-        .then(r => r.json())
+    function handleAuthTypeChange(val) {{
+      const gCookie = document.getElementById('groupAuthCookie');
+      const gLogin = document.getElementById('groupAuthLogin');
+      const gApi = document.getElementById('groupAuthApiKey');
+      const gHeaders = document.getElementById('groupAuthHeaders');
+
+      if (gCookie) gCookie.style.display = (val === 'cookie') ? 'block' : 'none';
+      if (gLogin) gLogin.style.display = (val === 'login') ? 'block' : 'none';
+      if (gApi) gApi.style.display = (val === 'api_key') ? 'block' : 'none';
+      if (gHeaders) gHeaders.style.display = (val === 'custom_header') ? 'block' : 'none';
+    }}
+
+    function openAddProfileModal() {{
+      const form = document.getElementById('formProfileEdit');
+      if (form) form.reset();
+      const idEl = document.getElementById('editProfileId');
+      if (idEl) idEl.value = '';
+      const titleEl = document.getElementById('lblProfileModalTitle');
+      if (titleEl) titleEl.innerText = 'Thêm Profile Xác thực Mới';
+      const selAuth = document.getElementById('profAuthType');
+      if (selAuth) {{
+        selAuth.value = 'cookie';
+        handleAuthTypeChange('cookie');
+      }}
+      openModal('modalProfileEdit');
+    }}
+
+    function openAddProfileForDomain(domain) {{
+      openAddProfileModal();
+      const domEl = document.getElementById('profDomain');
+      if (domEl) domEl.value = domain;
+      const nameEl = document.getElementById('profName');
+      if (nameEl) nameEl.value = 'Profile ' + domain;
+    }}
+
+    function openEditProfileModal(id) {{
+      fetch('/api/profiles/' + id)
+        .then(r => {{
+          if (!r.ok) throw new Error('Không thể tải profile ' + id);
+          return r.json();
+        }})
         .then(p => {{
-          showAddCookieForm(true, p);
+          const form = document.getElementById('formProfileEdit');
+          if (form) form.reset();
+
+          const idEl = document.getElementById('editProfileId');
+          if (idEl) idEl.value = p.id || id;
+
+          const domEl = document.getElementById('profDomain');
+          if (domEl) domEl.value = p.domain || p.website || '';
+
+          const nameEl = document.getElementById('profName');
+          if (nameEl) nameEl.value = p.name || '';
+
+          const authType = p.auth_type || 'cookie';
+          const selAuth = document.getElementById('profAuthType');
+          if (selAuth) {{
+            selAuth.value = authType;
+            handleAuthTypeChange(authType);
+          }}
+
+          if (document.getElementById('profCookie')) {{
+            document.getElementById('profCookie').value = p.cookie || '';
+          }}
+          if (document.getElementById('profUsername')) {{
+            document.getElementById('profUsername').value = p.username || '';
+          }}
+          if (document.getElementById('profPassword')) {{
+            document.getElementById('profPassword').value = '';
+            document.getElementById('profPassword').placeholder = '(Để trống nếu giữ nguyên mật khẩu cũ)';
+          }}
+          if (document.getElementById('profHeaderName')) {{
+            document.getElementById('profHeaderName').value = p.header_name || 'Authorization';
+          }}
+          if (document.getElementById('profApiKey')) {{
+            document.getElementById('profApiKey').value = p.api_key || '';
+          }}
+          if (document.getElementById('profCustomHeaders')) {{
+            document.getElementById('profCustomHeaders').value = p.custom_headers ? JSON.stringify(p.custom_headers, null, 2) : '';
+          }}
+          if (document.getElementById('profDesc')) {{
+            document.getElementById('profDesc').value = p.description || '';
+          }}
+
+          const titleEl = document.getElementById('lblProfileModalTitle');
+          if (titleEl) titleEl.innerText = 'Chỉnh sửa Profile: ' + (p.name || id);
+
+          openModal('modalProfileEdit');
         }})
         .catch(err => showToast('Lỗi: ' + err, true));
     }}
 
-    function handleSaveVaultCookie(e) {{
+    function handleSaveProfile(e) {{
       e.preventDefault();
+      const btn = document.getElementById('btnSubmitProfile');
+      if (btn) {{
+        btn.disabled = true;
+        btn.innerText = 'Đang lưu...';
+      }}
+
+      const id = document.getElementById('editProfileId').value.trim();
+      const domain = document.getElementById('profDomain').value.trim().toLowerCase();
+      const name = document.getElementById('profName').value.trim();
+      const authType = document.getElementById('profAuthType').value;
+      const desc = document.getElementById('profDesc') ? document.getElementById('profDesc').value.trim() : '';
+
+      let customHeaders = {{}};
+      const rawHdrs = document.getElementById('profCustomHeaders') ? document.getElementById('profCustomHeaders').value.trim() : '';
+      if (rawHdrs) {{
+        try {{
+          customHeaders = JSON.parse(rawHdrs);
+        }} catch(err) {{
+          showToast('Custom Headers JSON không hợp lệ!', true);
+          if (btn) {{ btn.disabled = false; btn.innerText = 'Lưu Profile'; }}
+          return;
+        }}
+      }}
+
       const payload = {{
-        id: document.getElementById('editCookieId').value.trim(),
-        name: document.getElementById('newVaultName').value.trim(),
-        website: document.getElementById('newVaultWebsite').value.trim().toLowerCase(),
-        scraper_type: document.getElementById('newVaultScraperType').value.trim().toLowerCase(),
-        cookie: document.getElementById('newVaultCookie').value.trim(),
-        description: document.getElementById('newVaultDesc').value.trim()
+        id: id,
+        name: name,
+        domain: domain,
+        website: domain,
+        auth_type: authType,
+        cookie: document.getElementById('profCookie') ? document.getElementById('profCookie').value.trim() : '',
+        username: document.getElementById('profUsername') ? document.getElementById('profUsername').value.trim() : '',
+        password: document.getElementById('profPassword') ? document.getElementById('profPassword').value : '',
+        header_name: document.getElementById('profHeaderName') ? document.getElementById('profHeaderName').value.trim() : 'Authorization',
+        api_key: document.getElementById('profApiKey') ? document.getElementById('profApiKey').value.trim() : '',
+        custom_headers: customHeaders,
+        description: desc
       }};
-      fetch('/api/cookies', {{
+
+      fetch('/api/profiles', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
         body: JSON.stringify(payload)
       }})
-      .then(r => r.json())
-      .then(d => {{
-        showToast('Đã lưu thành công bộ cookie cho trang [' + payload.website + ']!');
-        showAddCookieForm(false);
-        renderCookieVault();
-        populateProfileDropdown();
+      .then(r => {{
+        if (!r.ok) return r.json().then(e => Promise.reject(e.detail || 'Lỗi server'));
+        return r.json();
       }})
-      .catch(err => showToast('Lỗi: ' + err, true));
+      .then(d => {{
+        showToast('Đã lưu thành công Profile [' + payload.name + ']!');
+        closeModal('modalProfileEdit');
+        setTimeout(() => location.reload(), 600);
+      }})
+      .catch(err => {{
+        showToast('Lỗi: ' + err, true);
+        if (btn) {{ btn.disabled = false; btn.innerText = 'Lưu Profile'; }}
+      }});
     }}
 
-    function deleteVaultCookie(id) {{
-      if (!confirm('Xóa bộ cookie [' + id + '] khỏi Kho?')) return;
-      fetch('/api/cookies/' + id, {{ method: 'DELETE' }})
-        .then(r => r.json())
+    function deleteProfileModal(id) {{
+      if (!confirm('Bạn có chắc chắn muốn xóa Profile [' + id + '] không?')) return;
+      fetch('/api/profiles/' + id, {{ method: 'DELETE' }})
+        .then(r => {{
+          if (!r.ok) return r.json().then(e => Promise.reject(e.detail || 'Lỗi'));
+          return r.json();
+        }})
         .then(d => {{
-          showToast('Đã xóa bộ cookie');
-          renderCookieVault();
-          populateProfileDropdown();
+          showToast('Đã xóa thành công profile [' + id + ']');
+          setTimeout(() => location.reload(), 600);
         }})
         .catch(err => showToast('Lỗi khi xóa: ' + err, true));
+    }}
+
+    function copyProfileCredential(id) {{
+      fetch('/api/profiles/' + id)
+        .then(r => r.json())
+        .then(p => {{
+          let secret = '';
+          if (p.auth_type === 'cookie') secret = p.cookie || '';
+          else if (p.auth_type === 'login') secret = (p.username || '') + (p.password ? (':' + p.password) : '');
+          else if (p.auth_type === 'api_key') secret = (p.header_name || 'Authorization') + ': ' + (p.api_key || '');
+          else if (p.auth_type === 'custom_header') secret = JSON.stringify(p.custom_headers || {{}});
+          
+          if (!secret) {{
+            showToast('Profile không có chuỗi xác thực để sao chép', true);
+            return;
+          }}
+          navigator.clipboard.writeText(secret).then(() => {{
+            showToast('Đã chép thông tin xác thực của profile [' + (p.name || id) + ']!');
+          }}).catch(() => {{
+            showToast('Không thể sao chép thông tin!', true);
+          }});
+        }})
+        .catch(err => showToast('Lỗi: ' + err, true));
+    }}
+
+    function openCookieVaultModal() {{
+      switchMainTab('profiles');
     }}
 
     function handleSaveFeed(e) {{
@@ -2459,6 +3017,125 @@ async def dashboard(request: Request):
         }}
       }});
     }}
+
+    // TAB NAVIGATION & STATE
+    function switchMainTab(tab, updateHash = true) {{
+      const validTabs = ['dashboard', 'scrapers', 'profiles'];
+      if (!validTabs.includes(tab)) tab = 'dashboard';
+
+      // Update sidebar nav items
+      validTabs.forEach(t => {{
+        const navEl = document.getElementById('navItem_' + t);
+        if (navEl) {{
+          if (t === tab) navEl.classList.add('active');
+          else navEl.classList.remove('active');
+        }}
+      }});
+
+      // Update tab views
+      validTabs.forEach(t => {{
+        const viewEl = document.getElementById('view_' + t);
+        if (viewEl) {{
+          viewEl.style.display = (t === tab) ? 'block' : 'none';
+        }}
+      }});
+
+      // Update topbar action groups
+      validTabs.forEach(t => {{
+        const actEl = document.getElementById('topbarActions_' + t);
+        if (actEl) {{
+          actEl.style.display = (t === tab) ? 'flex' : 'none';
+        }}
+      }});
+
+      // Update Page Title
+      const titleEl = document.getElementById('mainPageTitle');
+      if (titleEl) {{
+        if (tab === 'dashboard') titleEl.innerText = 'Dashboard & Giám sát Lượt cào';
+        else if (tab === 'scrapers') titleEl.innerText = 'Quản lý Scraper & Kênh Feed';
+        else if (tab === 'profiles') titleEl.innerText = 'Quản lý Profile & Xác thực Domain';
+      }}
+
+      // Sync URL hash
+      if (updateHash && window.location.hash !== '#' + tab) {{
+        history.replaceState(null, null, '#' + tab);
+      }}
+
+      // Close mobile sidebar
+      toggleSidebar(false);
+    }}
+
+    function filterDashboardTable(query) {{
+      const q = (query || '').toLowerCase().trim();
+      const rows = document.querySelectorAll('#dashboardTable tbody tr');
+      rows.forEach(r => {{
+        if (!q || r.textContent.toLowerCase().includes(q)) {{
+          r.style.display = '';
+        }} else {{
+          r.style.display = 'none';
+        }}
+      }});
+    }}
+
+    function filterScrapersBySearch(query) {{
+      const q = (query || '').toLowerCase().trim();
+      const cards = document.querySelectorAll('#viewFeeds .feed-item');
+      cards.forEach(c => {{
+        if (!q || c.textContent.toLowerCase().includes(q)) {{
+          c.style.display = 'flex';
+        }} else {{
+          c.style.display = 'none';
+        }}
+      }});
+    }}
+
+    function filterProfiles(domain, pill) {{
+      document.querySelectorAll('#domainFilterPills .pill').forEach(p => p.classList.remove('active'));
+      if (pill) pill.classList.add('active');
+
+      const groups = document.querySelectorAll('#viewProfilesList .domain-group-section');
+      groups.forEach(g => {{
+        if (domain === 'all' || g.dataset.domain === domain) {{
+          g.style.display = 'block';
+        }} else {{
+          g.style.display = 'none';
+        }}
+      }});
+    }}
+
+    function filterProfilesBySearch(query) {{
+      const q = (query || '').toLowerCase().trim();
+      const groups = document.querySelectorAll('#viewProfilesList .domain-group-section');
+      groups.forEach(g => {{
+        let hasMatch = false;
+        const items = g.querySelectorAll('.profile-item');
+        items.forEach(it => {{
+          if (!q || it.textContent.toLowerCase().includes(q)) {{
+            it.style.display = 'flex';
+            hasMatch = true;
+          }} else {{
+            it.style.display = 'none';
+          }}
+        }});
+        g.style.display = hasMatch ? 'block' : 'none';
+      }});
+    }}
+
+    window.addEventListener('DOMContentLoaded', () => {{
+      const hash = window.location.hash.replace('#', '');
+      if (['dashboard', 'scrapers', 'profiles'].includes(hash)) {{
+        switchMainTab(hash, false);
+      }} else {{
+        switchMainTab('dashboard', false);
+      }}
+    }});
+
+    window.addEventListener('hashchange', () => {{
+      const hash = window.location.hash.replace('#', '');
+      if (['dashboard', 'scrapers', 'profiles'].includes(hash)) {{
+        switchMainTab(hash, false);
+      }}
+    }});
   </script>
   <style>
     @keyframes spin {{ 100% {{ transform: rotate(360deg); }} }}
