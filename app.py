@@ -901,7 +901,7 @@ async def dashboard(request: Request):
     main {{
       flex: 1;
       width: 100%;
-      padding: 18px 32px 80px 32px;
+      padding: 18px 32px 32px 32px;
       box-sizing: border-box;
     }}
 
@@ -1284,68 +1284,6 @@ async def dashboard(request: Request):
       line-height: 1.4;
     }}
 
-    /* Floating Dock Footer */
-    .content-footer {{
-      position: fixed;
-      bottom: 20px;
-      left: calc(50% + (var(--sidebar-w) / 2));
-      transform: translateX(-50%);
-      z-index: 45;
-      background: rgba(15, 23, 42, 0.85);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 9999px;
-      padding: 6px 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
-      max-width: calc(100vw - var(--sidebar-w) - 32px);
-      pointer-events: auto;
-    }}
-    .footer-stats-strip {{
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      overflow-x: auto;
-      scrollbar-width: none;
-    }}
-    .footer-stats-strip::-webkit-scrollbar {{ display: none; }}
-    .footer-stat-chip {{
-      height: 32px;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 0 12px;
-      border-radius: 9999px;
-      background: rgba(15, 23, 42, 0.7);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      font-size: 0.74rem;
-      white-space: nowrap;
-      transition: all 0.2s ease;
-      box-sizing: border-box;
-    }}
-    .footer-stat-chip:hover {{
-      border-color: rgba(255, 255, 255, 0.25);
-      background: rgba(30, 41, 59, 0.9);
-    }}
-    .chip-label {{
-      color: var(--text-dim, #94a3b8);
-      font-weight: 600;
-      font-size: 0.72rem;
-    }}
-    .chip-val {{
-      font-weight: 700;
-      color: #fff;
-      font-family: var(--mono);
-      font-size: 0.78rem;
-    }}
-    .chip-cyan .chip-val {{ color: #38bdf8; }}
-    .chip-emerald .chip-val {{ color: #34d399; }}
-    .chip-amber .chip-val {{ color: #fbbf24; }}
-    .chip-violet .chip-val {{ color: #c084fc; }}
-
     /* Toast Notification */
     .toast {{
       position: fixed;
@@ -1420,16 +1358,11 @@ async def dashboard(request: Request):
         padding: 0 16px;
       }}
       main {{
-        padding: 16px 12px 70px;
+        padding: 16px 12px 24px;
       }}
       .stats-grid {{
         grid-template-columns: 1fr !important;
         gap: 10px !important;
-      }}
-      .content-footer {{
-        left: 50%;
-        width: calc(100% - 24px);
-        max-width: 100%;
       }}
       .preset-interval-btn {{
         padding: 9px 12px;
@@ -1459,14 +1392,6 @@ async def dashboard(request: Request):
         transform: translateY(-2px);
         border-color: rgba(168, 85, 247, 0.5);
         box-shadow: 0 8px 24px rgba(168, 85, 247, 0.15);
-      }}
-      .footer-stat-chip.clickable {{
-        cursor: pointer;
-        transition: all 0.2s ease;
-      }}
-      .footer-stat-chip.clickable:hover {{
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(245, 158, 11, 0.35);
       }}
     }}
 
@@ -1798,29 +1723,6 @@ async def dashboard(request: Request):
         </div>
       </div>
     </main>
-
-    <!-- Floating Dock Footer -->
-    <div class="content-footer">
-      <div class="footer-stats-strip">
-        <div class="footer-stat-chip chip-cyan">
-          <span class="chip-label">Kênh:</span>
-          <span class="chip-val">{len(feeds)} Feeds</span>
-        </div>
-        <div class="footer-stat-chip chip-emerald">
-          <span class="chip-label">Bài viết:</span>
-          <span class="chip-val">{total_posts}</span>
-        </div>
-        <div class="footer-stat-chip chip-amber clickable" onclick="openAllIntervalsModal()" title="Xem lịch cào riêng của các Scraper">
-          <span class="chip-label">Tần suất:</span>
-          <span class="chip-val">Riêng từng Scraper</span>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 11px; height: 11px; opacity: 0.8; margin-left: 2px;"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div class="footer-stat-chip chip-violet">
-          <span class="chip-label">Gateway:</span>
-          <span class="chip-val">rss.data1box.win</span>
-        </div>
-      </div>
-    </div>
   </div>
 
   <!-- MODAL: ADD / CONFIGURE FEED -->
