@@ -145,6 +145,7 @@ async def api_create_or_update_feed(request: Request):
 
     use_flaresolverr = bool(data.get("use_flaresolverr", False))
     selectors = data.get("selectors", {})
+    custom_output = data.get("custom_output") or {}
 
     original_slug = sanitize_slug(data.get("original_slug", ""))
     feeds = load_feeds()
@@ -181,6 +182,7 @@ async def api_create_or_update_feed(request: Request):
         "cookie": cookie,
         "use_flaresolverr": use_flaresolverr,
         "selectors": selectors,
+        "custom_output": custom_output,
         "created_at": created_at,
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
@@ -265,6 +267,18 @@ async def dashboard(request: Request):
         else:
             cookie_badge = '<span class="badge" style="padding: 2px 7px; font-size: 0.65rem; opacity:0.65;" title="Chế độ Guest / Không dùng cookie">Guest</span>'
 
+        custom_out = meta.get("custom_output") or {}
+        custom_badges = []
+        if custom_out.get("filter_include"):
+            inc_preview = custom_out["filter_include"].split(",")[0][:10]
+            custom_badges.append(f'<span class="badge" style="padding: 2px 6px; font-size: 0.65rem; background: rgba(56, 189, 248, 0.1); color: #38bdf8; border-color: rgba(56, 189, 248, 0.25);" title="Bộ lọc Include: {custom_out["filter_include"]}">🔍 +{inc_preview}</span>')
+        if custom_out.get("filter_exclude"):
+            exc_preview = custom_out["filter_exclude"].split(",")[0][:10]
+            custom_badges.append(f'<span class="badge" style="padding: 2px 6px; font-size: 0.65rem; background: rgba(244, 63, 94, 0.1); color: #fb7185; border-color: rgba(244, 63, 94, 0.25);" title="Bộ lọc Exclude: {custom_out["filter_exclude"]}">🚫 -{exc_preview}</span>')
+        if custom_out.get("title_template"):
+            custom_badges.append('<span class="badge" style="padding: 2px 6px; font-size: 0.65rem; opacity: 0.8;" title="Mẫu tiêu đề tùy chỉnh">🏷️ Template</span>')
+        custom_badges_html = " ".join(custom_badges)
+
         # Recent items preview (sleek single row per article)
         preview_items_html = ""
         for p in posts[:3]:
@@ -300,6 +314,7 @@ async def dashboard(request: Request):
                             <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 5px; background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3); text-transform: uppercase;">{cat}</span>
                             <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 5px; background: rgba(255,255,255,0.06); color: var(--text-dim); border: 1px solid var(--card-border);">{type_badge}</span>
                             {cookie_badge}
+                            {custom_badges_html}
                         </div>
                         <div style="display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 0.73rem; color: var(--text-dim); flex-wrap: wrap;">
                             <span style="font-family: var(--mono); color: var(--text-muted); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{meta.get('target', slug)}">🎯 {meta.get('target', slug)}</span>
@@ -1394,6 +1409,71 @@ async def dashboard(request: Request):
           </div>
         </div>
 
+        <!-- 5. TÙY BIẾN ĐỊNH DẠNG ĐẦU RA (CUSTOM OUTPUT & FILTERS) -->
+        <div style="background: rgba(7, 12, 24, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 0.8rem; font-weight: 700; color: #38bdf8;">⚙️ Cấu hình Định dạng Đầu ra (Custom Output &amp; Filters)</span>
+            </div>
+            <span style="font-size: 0.68rem; color: var(--text-dim);">Tùy chỉnh RSS / JSON / Atom</span>
+          </div>
+
+          <!-- Title Template -->
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label class="form-label" style="display: flex; justify-content: space-between;">
+              <span>Mẫu Tiêu đề bài viết (Title Template)</span>
+              <span style="font-size: 0.7rem; color: var(--text-dim); font-weight: normal;">Hỗ trợ: {{title}}, {{author}}, {{category}}, {{date}}</span>
+            </label>
+            <input type="text" id="outTitleTemplate" class="form-input" placeholder="Để trống để dùng mặc định, hoặc vd: [{{category}}] {{title}}" style="font-family: var(--mono); font-size: 0.78rem;">
+            <div class="form-hint">Tùy biến cấu trúc tiêu đề xuất hiện trong ứng dụng đọc RSS (Feedly, Inoreader, NetNewsWire...).</div>
+          </div>
+
+          <!-- Content & Media Settings -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+            <div>
+              <label class="form-label">Chế độ Thân bài (Content Mode)</label>
+              <select id="outContentMode" class="form-select" style="font-size: 0.78rem;">
+                <option value="full" selected>📄 Toàn văn đầy đủ (Full Text &amp; Media)</option>
+                <option value="summary">✂️ Chỉ trích đoạn ngắn (Summary snippet)</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label">Giới hạn số bài xuất ra (Max items)</label>
+              <input type="number" id="outLimit" class="form-input" placeholder="Để trống hoặc vd: 25" min="1" max="200" style="font-size: 0.78rem;">
+            </div>
+          </div>
+
+          <!-- Checkboxes for Media & Links -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 12px; padding: 10px; background: rgba(15, 23, 42, 0.5); border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.05);">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--text-muted); cursor: pointer;">
+              <input type="checkbox" id="outIncludeImages" checked>
+              <span>🖼️ Nhúng hình ảnh</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--text-muted); cursor: pointer;">
+              <input type="checkbox" id="outIncludeSourceLink" checked>
+              <span>🔗 Link xem bài gốc</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--text-muted); cursor: pointer;">
+              <input type="checkbox" id="outIncludeEnclosures" checked>
+              <span>📥 Box file / Drive</span>
+            </label>
+          </div>
+
+          <!-- Keyword Filters -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div>
+              <label class="form-label">Chỉ lấy bài có từ khóa (Include)</label>
+              <input type="text" id="outFilterInclude" class="form-input" placeholder="vd: ebook, drive, AI, công nghệ" style="font-size: 0.78rem;">
+              <div class="form-hint">Phân tách dấu phẩy. Bài viết phải chứa ít nhất 1 từ.</div>
+            </div>
+            <div>
+              <label class="form-label">Bỏ qua bài có từ khóa (Exclude)</label>
+              <input type="text" id="outFilterExclude" class="form-input" placeholder="vd: quảng cáo, tuyển dụng, giveaway" style="font-size: 0.78rem;">
+              <div class="form-hint">Phân tách dấu phẩy. Bỏ qua nếu chứa từ này.</div>
+            </div>
+          </div>
+        </div>
+
         <div style="display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:20px; padding-top:16px; border-top:1px solid var(--card-border);">
           <button type="button" class="btn" onclick="closeModal('modalAdd')">Hủy bỏ</button>
           <button type="submit" id="btnSubmitFeed" class="btn primary">
@@ -1589,6 +1669,16 @@ async def dashboard(request: Request):
       if (document.getElementById('chkSaveToVault')) document.getElementById('chkSaveToVault').checked = false;
       if (document.getElementById('wrapProfileName')) document.getElementById('wrapProfileName').style.display = 'none';
 
+      // Reset Custom Output & Filters
+      if (document.getElementById('outTitleTemplate')) document.getElementById('outTitleTemplate').value = '';
+      if (document.getElementById('outContentMode')) document.getElementById('outContentMode').value = 'full';
+      if (document.getElementById('outLimit')) document.getElementById('outLimit').value = '';
+      if (document.getElementById('outIncludeImages')) document.getElementById('outIncludeImages').checked = true;
+      if (document.getElementById('outIncludeSourceLink')) document.getElementById('outIncludeSourceLink').checked = true;
+      if (document.getElementById('outIncludeEnclosures')) document.getElementById('outIncludeEnclosures').checked = true;
+      if (document.getElementById('outFilterInclude')) document.getElementById('outFilterInclude').value = '';
+      if (document.getElementById('outFilterExclude')) document.getElementById('outFilterExclude').value = '';
+
       const title = document.getElementById('modalAddTitle');
       if (title) title.innerText = 'Tạo Kênh RSS Mới (Universal Feed Generator)';
       const btnText = document.getElementById('btnSubmitFeedText');
@@ -1666,6 +1756,17 @@ async def dashboard(request: Request):
           document.getElementById('feedCookieCustom').value = f.cookie || '';
           if (document.getElementById('chkSaveToVault')) document.getElementById('chkSaveToVault').checked = false;
           if (document.getElementById('wrapProfileName')) document.getElementById('wrapProfileName').style.display = 'none';
+
+          // Pre-populate Custom Output & Filters
+          const cOut = f.custom_output || {{}};
+          if (document.getElementById('outTitleTemplate')) document.getElementById('outTitleTemplate').value = cOut.title_template || '';
+          if (document.getElementById('outContentMode')) document.getElementById('outContentMode').value = cOut.content_mode || 'full';
+          if (document.getElementById('outLimit')) document.getElementById('outLimit').value = (cOut.limit !== null && cOut.limit !== undefined) ? cOut.limit : '';
+          if (document.getElementById('outIncludeImages')) document.getElementById('outIncludeImages').checked = cOut.include_images !== false;
+          if (document.getElementById('outIncludeSourceLink')) document.getElementById('outIncludeSourceLink').checked = cOut.include_source_link !== false;
+          if (document.getElementById('outIncludeEnclosures')) document.getElementById('outIncludeEnclosures').checked = cOut.include_enclosures !== false;
+          if (document.getElementById('outFilterInclude')) document.getElementById('outFilterInclude').value = cOut.filter_include || '';
+          if (document.getElementById('outFilterExclude')) document.getElementById('outFilterExclude').value = cOut.filter_exclude || '';
 
           const title = document.getElementById('modalAddTitle');
           if (title) title.innerText = 'Chỉnh sửa Cấu hình Kênh: ' + (f.title || f.slug);
@@ -1961,6 +2062,17 @@ async def dashboard(request: Request):
       }}
 
       const originalSlug = document.getElementById('feedOriginalSlug') ? document.getElementById('feedOriginalSlug').value.trim() : '';
+      const customOutput = {{
+        title_template: document.getElementById('outTitleTemplate') ? document.getElementById('outTitleTemplate').value.trim() : '',
+        content_mode: document.getElementById('outContentMode') ? document.getElementById('outContentMode').value : 'full',
+        limit: (document.getElementById('outLimit') && document.getElementById('outLimit').value) ? parseInt(document.getElementById('outLimit').value) : null,
+        include_images: document.getElementById('outIncludeImages') ? document.getElementById('outIncludeImages').checked : true,
+        include_source_link: document.getElementById('outIncludeSourceLink') ? document.getElementById('outIncludeSourceLink').checked : true,
+        include_enclosures: document.getElementById('outIncludeEnclosures') ? document.getElementById('outIncludeEnclosures').checked : true,
+        filter_include: document.getElementById('outFilterInclude') ? document.getElementById('outFilterInclude').value.trim() : '',
+        filter_exclude: document.getElementById('outFilterExclude') ? document.getElementById('outFilterExclude').value.trim() : ''
+      }};
+
       const payload = {{
         original_slug: originalSlug,
         title: document.getElementById('feedTitle').value.trim(),
@@ -1976,7 +2088,8 @@ async def dashboard(request: Request):
         vault_profile_name: document.getElementById('vaultProfileName').value.trim(),
         vault_website: document.getElementById('vaultWebsite').value.trim(),
         use_flaresolverr: document.getElementById('chkUseFlareSolverr') ? document.getElementById('chkUseFlareSolverr').checked : false,
-        selectors: selectors
+        selectors: selectors,
+        custom_output: customOutput
       }};
 
       fetch('/api/feeds', {{
@@ -2054,14 +2167,15 @@ async def handle_feed_or_proxy(path: str, request: Request):
         if not isinstance(posts, list):
             posts = list(posts.values()) if isinstance(posts, dict) else []
 
+        q_params = dict(request.query_params)
         if ext in ("xml", "rss"):
-            content = generate_rss_xml(clean_path, posts, BASE_URL, meta)
+            content = generate_rss_xml(clean_path, posts, BASE_URL, meta, q_params)
             return Response(content=content, media_type="application/rss+xml; charset=utf-8")
         elif ext == "json":
-            data = generate_json_feed(clean_path, posts, BASE_URL, meta)
+            data = generate_json_feed(clean_path, posts, BASE_URL, meta, q_params)
             return JSONResponse(content=data, media_type="application/feed+json; charset=utf-8")
         elif ext == "atom":
-            content = generate_atom_xml(clean_path, posts, BASE_URL, meta)
+            content = generate_atom_xml(clean_path, posts, BASE_URL, meta, q_params)
             return Response(content=content, media_type="application/atom+xml; charset=utf-8")
 
     upstream_url = f"{RSSHUB_UPSTREAM}/{path}"
