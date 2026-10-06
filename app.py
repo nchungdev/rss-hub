@@ -1563,6 +1563,55 @@ async def dashboard(request: Request):
       }}
     }}
 
+    /* Table Layout for RAW Scraped Data */
+    .posts-table-layout {{
+      display: block !important;
+      width: 100% !important;
+      column-width: auto !important;
+      overflow-x: auto;
+    }}
+    .raw-data-table {{
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 0.8rem;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--card-bg);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    }}
+    .raw-data-table thead th {{
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(8px);
+      color: #94a3b8;
+      font-weight: 700;
+      font-size: 0.73rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--card-border);
+      white-space: nowrap;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }}
+    .raw-data-table tbody tr {{
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      transition: background 0.15s ease;
+    }}
+    .raw-data-table tbody tr:hover {{
+      background: rgba(255, 255, 255, 0.035);
+    }}
+    .raw-data-table tbody tr:last-child td {{
+      border-bottom: none;
+    }}
+    .raw-data-table td {{
+      padding: 10px 14px;
+      vertical-align: middle;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }}
+
     /* Task / Feed Cards */
     .task-list {{
       display: flex;
@@ -2248,13 +2297,16 @@ async def dashboard(request: Request):
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <!-- Layout toggle -->
             <div style="display: inline-flex; background: rgba(255,255,255,0.04); padding: 2px; border-radius: 6px; border: 1px solid var(--card-border); gap: 2px; height: 34px; align-items: center; box-sizing: border-box;">
-              <button type="button" class="btn-toggle active" id="btnRawLayoutMasonry" onclick="setRawViewLayout('masonry')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng thác nước (Masonry - Chiều cao tự do)">
+              <button type="button" class="btn-toggle active" id="btnRawLayoutTable" onclick="setRawViewLayout('table')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng Bảng dữ liệu">
+                <span>📋 Bảng</span>
+              </button>
+              <button type="button" class="btn-toggle" id="btnRawLayoutMasonry" onclick="setRawViewLayout('masonry')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng Thác nước (Cards)">
                 <span>Thác nước</span>
               </button>
-              <button type="button" class="btn-toggle" id="btnRawLayoutGrid" onclick="setRawViewLayout('grid')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng lưới">
+              <button type="button" class="btn-toggle" id="btnRawLayoutGrid" onclick="setRawViewLayout('grid')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng Lưới">
                 <span>Lưới</span>
               </button>
-              <button type="button" class="btn-toggle" id="btnRawLayoutList" onclick="setRawViewLayout('list')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng danh sách dọc">
+              <button type="button" class="btn-toggle" id="btnRawLayoutList" onclick="setRawViewLayout('list')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng Danh sách dọc">
                 <span>Dọc</span>
               </button>
             </div>
@@ -2273,9 +2325,9 @@ async def dashboard(request: Request):
           </div>
         </div>
 
-        <!-- Raw Posts Container (Waterfall default) -->
-        <div id="rawPostsList" class="posts-waterfall-layout">
-          <div style="column-span: all; grid-column: 1 / -1; width: 100%; text-align: center; padding: 40px; color: var(--text-dim);">Đang tải dữ liệu Scraped RAW...</div>
+        <!-- Raw Posts Container (Table default) -->
+        <div id="rawPostsList" class="posts-table-layout">
+          <div style="text-align: center; padding: 40px; color: var(--text-dim);">Đang tải dữ liệu Scraped RAW...</div>
         </div>
       </div>
 
@@ -3023,6 +3075,35 @@ async def dashboard(request: Request):
     </div>
   </div>
 
+  <!-- MODAL: RAW POST JSON & DETAILS INSPECTOR -->
+  <div id="modalRawJson" class="modal-overlay" onclick="handleModalClick(event, 'modalRawJson')">
+    <div class="modal-card" style="width: min(850px, 96%); max-height: 88vh; display: flex; flex-direction: column;">
+      <div class="modal-head" style="flex-shrink: 0;">
+        <div>
+          <h2 class="modal-title" id="lblRawJsonTitle">Chi Tiết Bài Viết RAW Scraped</h2>
+          <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 2px;" id="lblRawJsonSubtitle">Toàn bộ dữ liệu thô nhận được từ scraper engine</div>
+        </div>
+        <button class="modal-close" onclick="closeModal('modalRawJson')">✕</button>
+      </div>
+
+      <div style="overflow-y: auto; padding: 4px 0; flex: 1;" id="rawJsonModalBody">
+        <!-- Rendered by JS -->
+      </div>
+
+      <div class="modal-foot" style="padding-top: 12px; border-top: 1px solid var(--card-border); display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-shrink: 0; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button type="button" class="btn primary" id="btnCopyRawJson" onclick="copyCurrentRawJson()">
+            <span>📋 Sao chép Raw JSON</span>
+          </button>
+          <a id="btnOpenRawOriginalLink" href="#" target="_blank" rel="noopener" class="btn" style="text-decoration: none;">
+            <span>Mở link gốc ↗</span>
+          </a>
+        </div>
+        <button type="button" class="btn" onclick="closeModal('modalRawJson')" style="height: 32px; padding: 0 14px;">Đóng</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification -->
   <div id="toast" class="toast">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px; color: #34d399;"><polyline points="20 6 9 17 4 12"/></svg>
@@ -3444,7 +3525,7 @@ async def dashboard(request: Request):
     let currentOutputOnlyAttach = false;
     let currentRawOnlyAttach = false;
     let outputViewMode = 'masonry'; // 'masonry' | 'grid' | 'list'
-    let rawViewMode = 'masonry'; // 'masonry' | 'grid' | 'list'
+    let rawViewMode = 'table'; // 'table' | 'masonry' | 'grid' | 'list'
 
     function postHasAttachmentsOrDrive(p) {{
       if (p._attachments && p._attachments.length > 0) return true;
@@ -3510,17 +3591,28 @@ async def dashboard(request: Request):
     function setRawViewLayout(mode) {{
       rawViewMode = mode;
       const container = document.getElementById('rawPostsList');
+      const btnTable = document.getElementById('btnRawLayoutTable');
       const btnMasonry = document.getElementById('btnRawLayoutMasonry');
       const btnGrid = document.getElementById('btnRawLayoutGrid');
       const btnList = document.getElementById('btnRawLayoutList');
       if (container) {{
-        container.className = mode === 'masonry' ? 'posts-waterfall-layout' : (mode === 'list' ? 'posts-list-layout' : 'posts-grid-layout');
+        if (mode === 'table') {{
+          container.className = 'posts-table-layout';
+        }} else if (mode === 'masonry') {{
+          container.className = 'posts-waterfall-layout';
+        }} else if (mode === 'list') {{
+          container.className = 'posts-list-layout';
+        }} else {{
+          container.className = 'posts-grid-layout';
+        }}
       }}
-      if (btnMasonry && btnGrid && btnList) {{
+      if (btnTable && btnMasonry && btnGrid && btnList) {{
+        btnTable.classList.toggle('active', mode === 'table');
         btnMasonry.classList.toggle('active', mode === 'masonry');
         btnGrid.classList.toggle('active', mode === 'grid');
         btnList.classList.toggle('active', mode === 'list');
       }}
+      renderRawPostsList();
     }}
 
     function onOutputFeedFilterChange(val) {{
@@ -3670,10 +3762,190 @@ async def dashboard(request: Request):
       if (rawList) {{
         if (filtered.length === 0) {{
           rawList.innerHTML = '<div style="column-span: all; grid-column: 1 / -1; width: 100%; text-align:center; padding:48px; color:var(--text-dim); background:var(--card-bg); border-radius:12px; border:1px dashed var(--card-border);">Không có bài viết RAW nào phù hợp với bộ lọc.</div>';
+        }} else if (rawViewMode === 'table') {{
+          rawList.innerHTML = renderRawPostsTable(filtered);
         }} else {{
           rawList.innerHTML = filtered.map((item, idx) => renderPostCard(item, idx, 'raw')).join('');
         }}
       }}
+    }}
+
+    let currentModalRawPostJson = '';
+
+    function openRawJsonModal(postIndex) {{
+      const p = dashAllRawPosts[postIndex];
+      if (!p) return;
+      currentModalRawPostJson = JSON.stringify(p, null, 2);
+      
+      const title = p.preview_title || p.title || '(Không có tiêu đề)';
+      const feedSlug = p._feed_slug || 'Nguồn gốc';
+      const feedTitle = p._feed_title || feedSlug;
+      const url = p.url || p.link || '#';
+      const dateStr = p._formatted_date || p.pubDate || p.published || (p.taken_at ? new Date(p.taken_at * 1000).toLocaleString() : '') || p.created_at || '';
+
+      const titleEl = document.getElementById('lblRawJsonTitle');
+      if (titleEl) titleEl.innerText = title;
+      const subEl = document.getElementById('lblRawJsonSubtitle');
+      if (subEl) subEl.innerText = `Kênh: [${{feedSlug}}] ${{feedTitle}} • ${{dateStr}}`;
+
+      const linkBtn = document.getElementById('btnOpenRawOriginalLink');
+      if (linkBtn) {{
+        linkBtn.href = url;
+        linkBtn.style.display = (url && url !== '#') ? 'inline-flex' : 'none';
+      }}
+
+      const bodyEl = document.getElementById('rawJsonModalBody');
+      if (bodyEl) {{
+        bodyEl.innerHTML = `
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 12px;">
+              <div style="font-size: 0.73rem; font-weight: 700; color: #38bdf8; text-transform: uppercase; margin-bottom: 6px;">Nội dung Text thô (Raw Scraped Text):</div>
+              <div style="font-size: 0.82rem; color: #cbd5e1; line-height: 1.5; max-height: 140px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;">${{escapeHtmlText((p.text || p.content || p.description || '(Không có text)').trim())}}</div>
+            </div>
+            <div>
+              <div style="font-size: 0.73rem; font-weight: 700; color: #a78bfa; text-transform: uppercase; margin-bottom: 6px;">Cấu trúc đối tượng JSON hoàn chỉnh:</div>
+              <pre style="background: #020617; padding: 12px; border-radius: 8px; font-size: 0.75rem; max-height: 340px; overflow: auto; border: 1px solid rgba(255,255,255,0.08); font-family: var(--mono); color: #38bdf8; margin: 0;"><code>${{escapeHtmlText(currentModalRawPostJson)}}</code></pre>
+            </div>
+          </div>
+        `;
+      }}
+
+      openModal('modalRawJson');
+    }}
+
+    function copyCurrentRawJson() {{
+      if (!currentModalRawPostJson) return;
+      navigator.clipboard.writeText(currentModalRawPostJson).then(() => {{
+        showToast('✓ Đã sao chép toàn bộ Raw JSON');
+        const btn = document.getElementById('btnCopyRawJson');
+        if (btn) {{
+          const orig = btn.innerHTML;
+          btn.innerHTML = '<span>✓ Đã sao chép</span>';
+          setTimeout(() => {{ btn.innerHTML = orig; }}, 2000);
+        }}
+      }});
+    }}
+
+    function renderRawPostsTable(posts) {{
+      const rowsHtml = posts.map((item, idx) => {{
+        const origIdx = dashAllRawPosts.indexOf(item);
+        const feedSlug = item._feed_slug || '';
+        const feedTitle = item._feed_title || feedSlug;
+
+        const title = item.preview_title || item.title || (item.text ? item.text.slice(0, 80) : '') || '(Không có tiêu đề gốc)';
+        const link = item.url || item.link || '#';
+        const dateStr = item._formatted_date || item.pubDate || item.published || (item.taken_at ? new Date(item.taken_at * 1000).toLocaleString() : '') || item.created_at || '';
+
+        const fullRawText = (item.text || item.content || item.description || item.summary || '').trim();
+        const rawSnippet = fullRawText.length > 140 ? fullRawText.slice(0, 140) + '...' : fullRawText;
+
+        // Media / Drives info
+        const images = Array.isArray(item.images) ? item.images.filter(u => typeof u === 'string' && u.startsWith('http')) : [];
+        const videos = Array.isArray(item.videos) ? item.videos.filter(u => typeof u === 'string' && u.startsWith('http')) : (item.video_url ? [item.video_url] : []);
+        const gLinks = (item.gdrive_links || []).filter(u => typeof u === 'string' && u.startsWith('http'));
+
+        const mediaBadges = [];
+        if (gLinks.length > 0) {{
+          mediaBadges.push(`<a href="${{gLinks[0]}}" target="_blank" rel="noopener" class="chip-tag" style="padding: 1px 6px; font-size: 0.65rem; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 4px; text-decoration: none;" title="Google Drive Link">☁️ Drive (${{gLinks.length}})</a>`);
+        }}
+        if (images.length > 0) {{
+          mediaBadges.push(`<span class="badge" style="padding: 1px 6px; font-size: 0.65rem; background: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 4px;">🖼️ ${{images.length}} ảnh</span>`);
+        }}
+        if (videos.length > 0) {{
+          mediaBadges.push(`<span class="badge" style="padding: 1px 6px; font-size: 0.65rem; background: rgba(168, 85, 247, 0.1); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 4px;">🎬 Video</span>`);
+        }}
+        if (item.enclosure && item.enclosure.url) {{
+          mediaBadges.push(`<a href="${{item.enclosure.url}}" target="_blank" rel="noopener" class="chip-tag" style="padding: 1px 6px; font-size: 0.65rem; background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 4px; text-decoration: none;">📎 Enclosure</a>`);
+        }}
+
+        const mediaColHtml = mediaBadges.length > 0 
+          ? `<div style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">${{mediaBadges.join('')}}</div>`
+          : `<span style="color: var(--text-dim); opacity: 0.5;">—</span>`;
+
+        // Small thumbnail if image exists
+        let thumbCell = '';
+        if (images.length > 0) {{
+          thumbCell = `
+            <a href="${{link}}" target="_blank" rel="noopener" style="flex-shrink: 0; width: 44px; height: 34px; border-radius: 4px; overflow: hidden; background: #080c15; border: 1px solid rgba(255,255,255,0.08); display: block;">
+              <img src="${{images[0]}}" alt="" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.parentElement.style.display='none';" />
+            </a>
+          `;
+        }}
+
+        // Format Date
+        let displayDate = dateStr;
+        if (dateStr && (dateStr.includes('T') || !isNaN(Date.parse(dateStr)))) {{
+          try {{
+            const dObj = new Date(dateStr);
+            if (!isNaN(dObj.getTime())) {{
+              const hh = String(dObj.getHours()).padStart(2, '0');
+              const mm = String(dObj.getMinutes()).padStart(2, '0');
+              const dd = String(dObj.getDate()).padStart(2, '0');
+              const mo = String(dObj.getMonth() + 1).padStart(2, '0');
+              const yyyy = dObj.getFullYear();
+              displayDate = `${{hh}}:${{mm}} ${{dd}}/${{mo}}/${{yyyy}}`;
+            }}
+          }} catch(e) {{}}
+        }}
+
+        return `
+          <tr>
+            <td style="text-align: center; color: var(--text-dim); font-size: 0.72rem; font-family: var(--mono); width: 45px;">
+              #${{idx + 1}}
+            </td>
+            <td style="width: 140px; vertical-align: top;">
+              <span class="badge blue" style="font-size: 0.65rem; font-family: var(--mono); padding: 1px 6px;">${{escapeHtmlText(feedSlug)}}</span>
+              <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 3px; max-width: 135px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${{escapeHtmlText(feedTitle)}}">
+                ${{escapeHtmlText(feedTitle)}}
+              </div>
+            </td>
+            <td style="vertical-align: top;">
+              <div style="display: flex; align-items: flex-start; gap: 8px;">
+                ${{thumbCell}}
+                <div style="min-width: 0; flex: 1;">
+                  <a href="${{link}}" target="_blank" rel="noopener" style="font-weight: 600; color: #f8fafc; font-size: 0.82rem; text-decoration: none; display: block; line-height: 1.35; margin-bottom: 2px;" title="${{escapeHtmlText(title)}}">
+                    ${{escapeHtmlText(title)}} <span style="font-size: 0.68rem; opacity: 0.5;">↗</span>
+                  </a>
+                  <div style="font-size: 0.74rem; color: #94a3b8; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word;">
+                    ${{escapeHtmlText(rawSnippet || '(Nội dung rỗng)')}}
+                  </div>
+                </div>
+              </div>
+            </td>
+            <td style="width: 160px; vertical-align: top;">
+              ${{mediaColHtml}}
+            </td>
+            <td style="width: 130px; vertical-align: top; font-size: 0.72rem; color: var(--text-dim); white-space: nowrap;">
+              ${{displayDate || '—'}}
+            </td>
+            <td style="width: 90px; text-align: center; vertical-align: middle;">
+              <button type="button" class="btn" onclick="openRawJsonModal(${{origIdx}})" style="height: 26px; padding: 0 8px; font-size: 0.68rem; background: rgba(56,189,248,0.1); color: #38bdf8; border-color: rgba(56,189,248,0.3); border-radius: 4px;" title="Xem chi tiết & JSON Raw">
+                <span>{{ }} JSON</span>
+              </button>
+            </td>
+          </tr>
+        `;
+      }}).join('');
+
+      return `
+        <div style="width: 100%; overflow-x: auto; border: 1px solid var(--card-border); border-radius: 12px; background: var(--card-bg); box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+          <table class="raw-data-table">
+            <thead>
+              <tr>
+                <th style="width: 45px; text-align: center;">#</th>
+                <th style="width: 140px;">Kênh Feed</th>
+                <th>Tiêu đề &amp; Nội dung Scraped (RAW)</th>
+                <th style="width: 160px;">Media / Drive / File</th>
+                <th style="width: 130px;">Thời gian</th>
+                <th style="width: 90px; text-align: center;">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${{rowsHtml}}
+            </tbody>
+          </table>
+        </div>
+      `;
     }}
 
     function escapeHtmlText(str) {{
