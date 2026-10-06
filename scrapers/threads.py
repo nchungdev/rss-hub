@@ -154,23 +154,23 @@ def fetch_threads_posts(tag: str = "bookthreads", max_timeout: int = 60000, cust
                 gdrive_links.append(preview_url)
 
         images = []
-        if "image_versions2" in p:
+        if p.get("image_versions2"):
             cands = p["image_versions2"].get("candidates", [])
             if cands:
                 images.append(cands[0].get("url"))
-        elif "carousel_media" in p:
-            for cm in p.get("carousel_media", []):
-                c_cands = cm.get("image_versions2", {}).get("candidates", [])
+        elif p.get("carousel_media"):
+            for cm in (p.get("carousel_media") or []):
+                c_cands = (cm.get("image_versions2") or {}).get("candidates", [])
                 if c_cands:
                     images.append(c_cands[0].get("url"))
 
         videos = []
-        if "video_versions" in p and p["video_versions"]:
+        if p.get("video_versions"):
             v_url = p["video_versions"][0].get("url")
             if v_url: videos.append(v_url)
-        elif "carousel_media" in p:
-            for cm in p.get("carousel_media", []):
-                if "video_versions" in cm and cm["video_versions"]:
+        elif p.get("carousel_media"):
+            for cm in (p.get("carousel_media") or []):
+                if cm.get("video_versions"):
                     v_url = cm["video_versions"][0].get("url")
                     if v_url: videos.append(v_url)
 
