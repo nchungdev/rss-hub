@@ -2248,14 +2248,11 @@ async def dashboard(request: Request):
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <!-- Layout toggle -->
             <div style="display: inline-flex; background: rgba(255,255,255,0.04); padding: 2px; border-radius: 6px; border: 1px solid var(--card-border); gap: 2px; height: 34px; align-items: center; box-sizing: border-box;">
-              <button type="button" class="btn-toggle active" id="btnOutputLayoutMasonry" onclick="setOutputViewLayout('masonry')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng thác nước (Masonry - Chiều cao tự do)">
+              <button type="button" class="btn-toggle active" id="btnOutputLayoutMasonry" onclick="setOutputViewLayout('masonry')" style="height: 28px; padding: 0 10px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng thác nước (Cards)">
                 <span>Thác nước</span>
               </button>
-              <button type="button" class="btn-toggle" id="btnOutputLayoutGrid" onclick="setOutputViewLayout('grid')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng lưới">
-                <span>Lưới</span>
-              </button>
-              <button type="button" class="btn-toggle" id="btnOutputLayoutList" onclick="setOutputViewLayout('list')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng danh sách dọc">
-                <span>Dọc</span>
+              <button type="button" class="btn-toggle" id="btnOutputLayoutTable" onclick="setOutputViewLayout('table')" style="height: 28px; padding: 0 10px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng bảng dữ liệu">
+                <span>Bảng</span>
               </button>
             </div>
 
@@ -2297,17 +2294,11 @@ async def dashboard(request: Request):
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <!-- Layout toggle -->
             <div style="display: inline-flex; background: rgba(255,255,255,0.04); padding: 2px; border-radius: 6px; border: 1px solid var(--card-border); gap: 2px; height: 34px; align-items: center; box-sizing: border-box;">
-              <button type="button" class="btn-toggle active" id="btnRawLayoutTable" onclick="setRawViewLayout('table')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng Bảng dữ liệu">
+              <button type="button" class="btn-toggle active" id="btnRawLayoutTable" onclick="setRawViewLayout('table')" style="height: 28px; padding: 0 10px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng bảng dữ liệu">
                 <span>📋 Bảng</span>
               </button>
-              <button type="button" class="btn-toggle" id="btnRawLayoutMasonry" onclick="setRawViewLayout('masonry')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng Thác nước (Cards)">
+              <button type="button" class="btn-toggle" id="btnRawLayoutMasonry" onclick="setRawViewLayout('masonry')" style="height: 28px; padding: 0 10px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng thác nước (Cards)">
                 <span>Thác nước</span>
-              </button>
-              <button type="button" class="btn-toggle" id="btnRawLayoutGrid" onclick="setRawViewLayout('grid')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng Lưới">
-                <span>Lưới</span>
-              </button>
-              <button type="button" class="btn-toggle" id="btnRawLayoutList" onclick="setRawViewLayout('list')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng Danh sách dọc">
-                <span>Dọc</span>
               </button>
             </div>
 
@@ -3576,16 +3567,15 @@ async def dashboard(request: Request):
       outputViewMode = mode;
       const container = document.getElementById('outputPostsList');
       const btnMasonry = document.getElementById('btnOutputLayoutMasonry');
-      const btnGrid = document.getElementById('btnOutputLayoutGrid');
-      const btnList = document.getElementById('btnOutputLayoutList');
+      const btnTable = document.getElementById('btnOutputLayoutTable');
       if (container) {{
-        container.className = mode === 'masonry' ? 'posts-waterfall-layout' : (mode === 'list' ? 'posts-list-layout' : 'posts-grid-layout');
+        container.className = mode === 'table' ? 'posts-table-layout' : 'posts-waterfall-layout';
       }}
-      if (btnMasonry && btnGrid && btnList) {{
+      if (btnMasonry && btnTable) {{
         btnMasonry.classList.toggle('active', mode === 'masonry');
-        btnGrid.classList.toggle('active', mode === 'grid');
-        btnList.classList.toggle('active', mode === 'list');
+        btnTable.classList.toggle('active', mode === 'table');
       }}
+      renderOutputPostsList();
     }}
 
     function setRawViewLayout(mode) {{
@@ -3593,24 +3583,12 @@ async def dashboard(request: Request):
       const container = document.getElementById('rawPostsList');
       const btnTable = document.getElementById('btnRawLayoutTable');
       const btnMasonry = document.getElementById('btnRawLayoutMasonry');
-      const btnGrid = document.getElementById('btnRawLayoutGrid');
-      const btnList = document.getElementById('btnRawLayoutList');
       if (container) {{
-        if (mode === 'table') {{
-          container.className = 'posts-table-layout';
-        }} else if (mode === 'masonry') {{
-          container.className = 'posts-waterfall-layout';
-        }} else if (mode === 'list') {{
-          container.className = 'posts-list-layout';
-        }} else {{
-          container.className = 'posts-grid-layout';
-        }}
+        container.className = mode === 'table' ? 'posts-table-layout' : 'posts-waterfall-layout';
       }}
-      if (btnTable && btnMasonry && btnGrid && btnList) {{
+      if (btnTable && btnMasonry) {{
         btnTable.classList.toggle('active', mode === 'table');
         btnMasonry.classList.toggle('active', mode === 'masonry');
-        btnGrid.classList.toggle('active', mode === 'grid');
-        btnList.classList.toggle('active', mode === 'list');
       }}
       renderRawPostsList();
     }}
@@ -3735,10 +3713,141 @@ async def dashboard(request: Request):
       if (outList) {{
         if (filtered.length === 0) {{
           outList.innerHTML = '<div style="column-span: all; grid-column: 1 / -1; width: 100%; text-align:center; padding:48px; color:var(--text-dim); background:var(--card-bg); border-radius:12px; border:1px dashed var(--card-border);">Không có bài viết output nào phù hợp với bộ lọc.</div>';
+        }} else if (outputViewMode === 'table') {{
+          outList.innerHTML = renderOutputPostsTable(filtered);
         }} else {{
           outList.innerHTML = filtered.map((item, idx) => renderPostCard(item, idx, 'output')).join('');
         }}
       }}
+    }}
+
+    function renderOutputPostsTable(posts) {{
+      const rowsHtml = posts.map((item, idx) => {{
+        const feedSlug = item._feed_slug || '';
+        const feedTitle = item._feed_title || feedSlug;
+
+        const title = item._formatted_title || item.preview_title || item.title || '(Không có tiêu đề)';
+        const link = item.url || item.link || '#';
+        const dateStr = item._formatted_date || item.pubDate || item.published || (item.taken_at ? new Date(item.taken_at * 1000).toLocaleString() : '') || item.created_at || '';
+
+        const fullText = (item._formatted_html || item.content || item.text || item.description || item.summary || '').trim();
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = fullText;
+        const cleanFullText = tempDiv.textContent || tempDiv.innerText || '';
+
+        let summaryText = (item._summary || item.summary || '').trim();
+        if (!summaryText) {{
+          summaryText = cleanFullText.length > 140 ? cleanFullText.slice(0, 140) + '...' : cleanFullText;
+        }}
+
+        // Images
+        const rawImages = item._formatted_images || item.images || [];
+        const images = Array.isArray(rawImages) ? rawImages.filter(u => typeof u === 'string' && u.startsWith('http')) : [];
+
+        // Attachments
+        let attachments = item._attachments || [];
+        const mediaBadges = [];
+        (attachments || []).forEach(att => {{
+          let isDrive = att.ext === 'gdrive' || (att.url && att.url.includes('drive.google.com'));
+          let isSheet = att.ext === 'gsheet' || (att.url && att.url.includes('spreadsheets'));
+          let icon = (isDrive || isSheet) ? '☁️' : '📎';
+          let label = isSheet ? 'GSheet' : (isDrive ? 'GDrive' : (att.ext || 'File').toUpperCase());
+          let bg = (isDrive || isSheet) ? 'rgba(16, 185, 129, 0.15)' : 'rgba(56, 189, 248, 0.1)';
+          let color = (isDrive || isSheet) ? '#34d399' : '#38bdf8';
+          let border = (isDrive || isSheet) ? 'rgba(16, 185, 129, 0.3)' : 'rgba(56, 189, 248, 0.25)';
+          mediaBadges.push(`<a href="${{att.url}}" target="_blank" rel="noopener" class="chip-tag" style="padding: 1px 6px; font-size: 0.65rem; background: ${{bg}}; color: ${{color}}; border: 1px solid ${{border}}; border-radius: 4px; text-decoration: none;" title="${{escapeHtmlText(att.title || att.url)}}">${{icon}} ${{label}}</a>`);
+        }});
+
+        if (images.length > 0) {{
+          mediaBadges.push(`<span class="badge" style="padding: 1px 6px; font-size: 0.65rem; background: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 4px;">🖼️ ${{images.length}} ảnh</span>`);
+        }}
+
+        const mediaColHtml = mediaBadges.length > 0 
+          ? `<div style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">${{mediaBadges.join('')}}</div>`
+          : `<span style="color: var(--text-dim); opacity: 0.5;">—</span>`;
+
+        let thumbCell = '';
+        if (images.length > 0) {{
+          thumbCell = `
+            <a href="${{link}}" target="_blank" rel="noopener" style="flex-shrink: 0; width: 44px; height: 34px; border-radius: 4px; overflow: hidden; background: #080c15; border: 1px solid rgba(255,255,255,0.08); display: block;">
+              <img src="${{images[0]}}" alt="" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.parentElement.style.display='none';" />
+            </a>
+          `;
+        }}
+
+        let displayDate = dateStr;
+        if (dateStr && (dateStr.includes('T') || !isNaN(Date.parse(dateStr)))) {{
+          try {{
+            const dObj = new Date(dateStr);
+            if (!isNaN(dObj.getTime())) {{
+              const hh = String(dObj.getHours()).padStart(2, '0');
+              const mm = String(dObj.getMinutes()).padStart(2, '0');
+              const dd = String(dObj.getDate()).padStart(2, '0');
+              const mo = String(dObj.getMonth() + 1).padStart(2, '0');
+              const yyyy = dObj.getFullYear();
+              displayDate = `${{hh}}:${{mm}} ${{dd}}/${{mo}}/${{yyyy}}`;
+            }}
+          }} catch(e) {{}}
+        }}
+
+        return `
+          <tr>
+            <td style="text-align: center; color: var(--text-dim); font-size: 0.72rem; font-family: var(--mono); width: 45px;">
+              #${{idx + 1}}
+            </td>
+            <td style="width: 140px; vertical-align: top;">
+              <span class="badge green" style="font-size: 0.65rem; font-family: var(--mono); padding: 1px 6px;">${{escapeHtmlText(feedSlug)}}</span>
+              <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 3px; max-width: 135px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${{escapeHtmlText(feedTitle)}}">
+                ${{escapeHtmlText(feedTitle)}}
+              </div>
+            </td>
+            <td style="vertical-align: top;">
+              <div style="display: flex; align-items: flex-start; gap: 8px;">
+                ${{thumbCell}}
+                <div style="min-width: 0; flex: 1;">
+                  <a href="${{link}}" target="_blank" rel="noopener" style="font-weight: 600; color: #f8fafc; font-size: 0.82rem; text-decoration: none; display: block; line-height: 1.35; margin-bottom: 2px;" title="${{escapeHtmlText(title)}}">
+                    ${{escapeHtmlText(title)}} <span style="font-size: 0.68rem; opacity: 0.5;">↗</span>
+                  </a>
+                  <div style="font-size: 0.74rem; color: #94a3b8; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word;">
+                    ${{escapeHtmlText(summaryText || '(Không có nội dung)')}}
+                  </div>
+                </div>
+              </div>
+            </td>
+            <td style="width: 160px; vertical-align: top;">
+              ${{mediaColHtml}}
+            </td>
+            <td style="width: 130px; vertical-align: top; font-size: 0.72rem; color: var(--text-dim); white-space: nowrap;">
+              ${{displayDate || '—'}}
+            </td>
+            <td style="width: 80px; text-align: center; vertical-align: middle;">
+              <a href="${{link}}" target="_blank" rel="noopener" class="btn" style="height: 26px; padding: 0 8px; font-size: 0.68rem; text-decoration: none; display: inline-flex; align-items: center; justify-content: center;" title="Mở liên kết bài viết">
+                <span>Mở bài ↗</span>
+              </a>
+            </td>
+          </tr>
+        `;
+      }}).join('');
+
+      return `
+        <div style="width: 100%; overflow-x: auto; border: 1px solid var(--card-border); border-radius: 12px; background: var(--card-bg); box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+          <table class="raw-data-table">
+            <thead>
+              <tr>
+                <th style="width: 45px; text-align: center;">#</th>
+                <th style="width: 140px;">Kênh Feed</th>
+                <th>Tiêu đề &amp; Tóm tắt Output</th>
+                <th style="width: 160px;">File / Drive / Media</th>
+                <th style="width: 130px;">Thời gian</th>
+                <th style="width: 80px; text-align: center;">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${{rowsHtml}}
+            </tbody>
+          </table>
+        </div>
+      `;
     }}
 
     function renderRawPostsList() {{
