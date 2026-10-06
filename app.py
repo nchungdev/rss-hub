@@ -2143,23 +2143,23 @@ async def dashboard(request: Request):
 
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <!-- Layout toggle -->
-            <div style="display: inline-flex; background: rgba(255,255,255,0.04); padding: 2px; border-radius: 6px; border: 1px solid var(--card-border); gap: 2px;">
-              <button type="button" class="btn-toggle active" id="btnOutputLayoutGrid" onclick="setOutputViewLayout('grid')" style="height: 26px; padding: 0 8px; font-size: 0.7rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng lưới">
+            <div style="display: inline-flex; background: rgba(255,255,255,0.04); padding: 2px; border-radius: 6px; border: 1px solid var(--card-border); gap: 2px; height: 34px; align-items: center; box-sizing: border-box;">
+              <button type="button" class="btn-toggle active" id="btnOutputLayoutGrid" onclick="setOutputViewLayout('grid')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng lưới">
                 <span>Lưới</span>
               </button>
-              <button type="button" class="btn-toggle" id="btnOutputLayoutList" onclick="setOutputViewLayout('list')" style="height: 26px; padding: 0 8px; font-size: 0.7rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng danh sách dọc">
+              <button type="button" class="btn-toggle" id="btnOutputLayoutList" onclick="setOutputViewLayout('list')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng danh sách dọc">
                 <span>Dọc</span>
               </button>
             </div>
 
-            <select id="outputFeedFilter" class="form-input" style="height: 32px; font-size: 0.76rem; width: 175px;" onchange="onOutputFeedFilterChange(this.value)">
+            <select id="outputFeedFilter" class="form-input" style="height: 34px; padding: 4px 10px; font-size: 0.76rem; width: 195px; line-height: 24px; box-sizing: border-box;" onchange="onOutputFeedFilterChange(this.value)">
               <option value="all">🔍 Tất cả Kênh Feed</option>
             </select>
-            <button type="button" class="btn" id="btnOutputFilterAttach" onclick="toggleOutputFilterAttach()" style="height: 32px; padding: 0 9px; font-size: 0.72rem; color: #10b981; border-color: rgba(16,185,129,0.3);" title="Chỉ lọc bài viết có Google Drive hoặc File đính kèm">
+            <button type="button" class="btn" id="btnOutputFilterAttach" onclick="toggleOutputFilterAttach()" style="height: 34px; padding: 0 10px; font-size: 0.72rem; color: #10b981; border-color: rgba(16,185,129,0.3); box-sizing: border-box;" title="Chỉ lọc bài viết có Google Drive hoặc File đính kèm">
               <span>☁️ Có Drive/File</span>
             </button>
-            <input type="text" id="outputPostSearch" class="form-input" placeholder="🔍 Tìm kiếm bài viết, drive..." style="height: 32px; font-size: 0.76rem; width: 175px;" oninput="onOutputPostSearch(this.value)">
-            <button type="button" class="btn" onclick="reloadAllPostsData()" style="height: 32px; padding: 0 10px; font-size: 0.74rem;" title="Làm mới lại dữ liệu">
+            <input type="text" id="outputPostSearch" class="form-input" placeholder="🔍 Tìm kiếm bài viết, drive..." style="height: 34px; padding: 4px 10px; font-size: 0.76rem; width: 195px; line-height: 24px; box-sizing: border-box;" oninput="onOutputPostSearch(this.value)">
+            <button type="button" class="btn" onclick="reloadAllPostsData()" style="height: 34px; padding: 0 10px; font-size: 0.74rem; box-sizing: border-box;" title="Làm mới lại dữ liệu">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
               <span>Làm mới</span>
             </button>
@@ -2189,23 +2189,23 @@ async def dashboard(request: Request):
 
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <!-- Layout toggle -->
-            <div style="display: inline-flex; background: rgba(255,255,255,0.04); padding: 2px; border-radius: 6px; border: 1px solid var(--card-border); gap: 2px;">
-              <button type="button" class="btn-toggle active" id="btnRawLayoutGrid" onclick="setRawViewLayout('grid')" style="height: 26px; padding: 0 8px; font-size: 0.7rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng lưới">
+            <div style="display: inline-flex; background: rgba(255,255,255,0.04); padding: 2px; border-radius: 6px; border: 1px solid var(--card-border); gap: 2px; height: 34px; align-items: center; box-sizing: border-box;">
+              <button type="button" class="btn-toggle active" id="btnRawLayoutGrid" onclick="setRawViewLayout('grid')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng lưới">
                 <span>Lưới</span>
               </button>
-              <button type="button" class="btn-toggle" id="btnRawLayoutList" onclick="setRawViewLayout('list')" style="height: 26px; padding: 0 8px; font-size: 0.7rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng danh sách dọc">
+              <button type="button" class="btn-toggle" id="btnRawLayoutList" onclick="setRawViewLayout('list')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng danh sách dọc">
                 <span>Dọc</span>
               </button>
             </div>
 
-            <select id="rawFeedFilter" class="form-input" style="height: 32px; font-size: 0.76rem; width: 175px;" onchange="onRawFeedFilterChange(this.value)">
+            <select id="rawFeedFilter" class="form-input" style="height: 34px; padding: 4px 10px; font-size: 0.76rem; width: 195px; line-height: 24px; box-sizing: border-box;" onchange="onRawFeedFilterChange(this.value)">
               <option value="all">🔍 Tất cả Kênh Feed</option>
             </select>
-            <button type="button" class="btn" id="btnRawFilterAttach" onclick="toggleRawFilterAttach()" style="height: 32px; padding: 0 9px; font-size: 0.72rem; color: #38bdf8; border-color: rgba(56,189,248,0.3);" title="Chỉ lọc bài viết có Google Drive hoặc File đính kèm">
+            <button type="button" class="btn" id="btnRawFilterAttach" onclick="toggleRawFilterAttach()" style="height: 34px; padding: 0 10px; font-size: 0.72rem; color: #38bdf8; border-color: rgba(56,189,248,0.3); box-sizing: border-box;" title="Chỉ lọc bài viết có Google Drive hoặc File đính kèm">
               <span>☁️ Có Drive/File</span>
             </button>
-            <input type="text" id="rawPostSearch" class="form-input" placeholder="🔍 Tìm kiếm bài viết gốc, drive..." style="height: 32px; font-size: 0.76rem; width: 175px;" oninput="onRawPostSearch(this.value)">
-            <button type="button" class="btn" onclick="reloadAllPostsData()" style="height: 32px; padding: 0 10px; font-size: 0.74rem;" title="Làm mới lại dữ liệu">
+            <input type="text" id="rawPostSearch" class="form-input" placeholder="🔍 Tìm kiếm bài viết gốc, drive..." style="height: 34px; padding: 4px 10px; font-size: 0.76rem; width: 195px; line-height: 24px; box-sizing: border-box;" oninput="onRawPostSearch(this.value)">
+            <button type="button" class="btn" onclick="reloadAllPostsData()" style="height: 34px; padding: 0 10px; font-size: 0.74rem; box-sizing: border-box;" title="Làm mới lại dữ liệu">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
               <span>Làm mới</span>
             </button>
@@ -3657,32 +3657,67 @@ async def dashboard(request: Request):
       tempDiv.innerHTML = fullText;
       const cleanFullText = tempDiv.textContent || tempDiv.innerText || '';
 
-      // 1. SMART SUMMARY
+      // 1. SMART SUMMARY (3 dòng)
       let summaryText = (item._summary || item.summary || '').trim();
       if (!summaryText) {{
         summaryText = cleanFullText.length > 220 ? cleanFullText.slice(0, 220) + '...' : cleanFullText;
       }}
-      const hasFullContentToExpand = cleanFullText.length > summaryText.length + 30;
-      const fullTextId = 'full_text_' + type + '_' + idx;
       const safeSummary = escapeHtmlText(summaryText);
-      const safeFullText = escapeHtmlText(cleanFullText);
 
-      const expandBtnHtml = hasFullContentToExpand
-        ? `<button type="button" onclick="toggleFullContent('${{fullTextId}}', this)" style="background:none; border:none; color:var(--text-dim); font-size:0.68rem; cursor:pointer; text-decoration:underline;">Toàn văn ▾</button>`
-        : '';
-
-      const fullContentHtml = hasFullContentToExpand
-        ? `<div id="${{fullTextId}}" style="display:none; margin-top:8px; padding-top:8px; border-top:1px dashed rgba(255,255,255,0.08); font-size:0.75rem; color:var(--text-muted); line-height:1.5; word-break: break-word;">${{safeFullText}}</div>`
-        : '';
-
-      // 2. IMAGES & VIDEOS
+      // 2. IMAGES & VIDEOS (THUMBNAIL 3:2)
       const rawImages = item._formatted_images || item.images || [];
       const images = Array.isArray(rawImages) ? rawImages.filter(u => typeof u === 'string' && u.startsWith('http')) : [];
       
       const rawVideos = item._formatted_videos || item.videos || (item.video_url ? [item.video_url] : []);
       const videos = Array.isArray(rawVideos) ? rawVideos.filter(u => typeof u === 'string' && u.startsWith('http')) : [];
 
-      // 3. ATTACHMENTS (EBOOKS, DRIVE, DIRECT FILES, ENCLOSURES)
+      let thumbHtml = '';
+      if (images.length > 0) {{
+        thumbHtml = `
+          <div style="width: 100%; aspect-ratio: 3 / 2; border-radius: 8px; overflow: hidden; background: #080c15; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.08); position: relative;">
+            <a href="${{link}}" target="_blank" rel="noopener" style="display: block; width: 100%; height: 100%;">
+              <img src="${{images[0]}}" alt="${{escapeHtmlText(title)}}" loading="lazy" style="width: 100%; height: 100%; object-fit: cover; display: block;" onerror="this.parentElement.parentElement.style.display='none';" />
+            </a>
+            ${{images.length > 1 ? `<span style="position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.72); backdrop-filter: blur(4px); color: #fff; font-size: 0.62rem; font-weight: 600; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15);">🖼️ +${{images.length - 1}}</span>` : ''}}
+          </div>
+        `;
+      }} else if (videos.length > 0) {{
+        const vUrl = videos[0];
+        const isDirectVideo = vUrl.endsWith('.mp4') || vUrl.endsWith('.webm') || vUrl.includes('video');
+        if (isDirectVideo) {{
+          thumbHtml = `
+            <div style="width: 100%; aspect-ratio: 3 / 2; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.08);">
+              <video controls playsinline preload="metadata" style="width: 100%; height: 100%; object-fit: cover; display: block;">
+                <source src="${{vUrl}}">
+              </video>
+            </div>
+          `;
+        }} else {{
+          thumbHtml = `
+            <div style="width: 100%; aspect-ratio: 3 / 2; border-radius: 8px; overflow: hidden; background: #080c15; margin-bottom: 10px; border: 1px solid rgba(56,189,248,0.25); display: flex; align-items: center; justify-content: center;">
+              <a href="${{vUrl}}" target="_blank" rel="noopener" class="btn" style="height: 28px; padding: 0 10px; font-size: 0.7rem; background: rgba(56,189,248,0.15); color: #38bdf8; border-color: rgba(56,189,248,0.35);">
+                ▶ Mở Video
+              </a>
+            </div>
+          `;
+        }}
+      }}
+
+      // 3. TITLE (1 DÒNG THÔI)
+      const titleHtml = `
+        <a href="${{link}}" target="_blank" rel="noopener" title="${{escapeHtmlText(title)}}" style="font-size: 0.94rem; font-weight: 700; color: #f8fafc; text-decoration: none; line-height: 1.35; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 6px;">
+          ${{escapeHtmlText(title)}}
+        </a>
+      `;
+
+      // 4. SUMMARIZE (3 DÒNG)
+      const summaryHtml = `
+        <div style="font-size: 0.77rem; color: #94a3b8; line-height: 1.48; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; margin-bottom: 10px;" title="${{safeSummary}}">
+          ${{safeSummary}}
+        </div>
+      `;
+
+      // 5. ATTACHMENTS (CHIP TAGS)
       let attachments = item._attachments || [];
       if (!attachments || attachments.length === 0) {{
         attachments = [];
@@ -3703,7 +3738,7 @@ async def dashboard(request: Request):
         const combinedRaw = (item.text || '') + ' ' + (item.content || '') + ' ' + (item.description || '');
         const prevUrl = cleanRedirectUrl(item.preview_url || '');
 
-        // 1. Google Drive & Docs / Sheets
+        // Google Drive & Docs / Sheets
         const gLinks = (item.gdrive_links || []).map(cleanRedirectUrl);
         const driveRegex = /https?:\\/\\/(?:drive|docs)\\.google\\.com\\/[^\\s<>"')]+/gi;
         const textDrive = combinedRaw.match(driveRegex) || [];
@@ -3728,7 +3763,7 @@ async def dashboard(request: Request):
           }}
         }});
 
-        // 2. Cloud storage
+        // Cloud storage
         const cloudRegex = /https?:\\/\\/(?:www\\.)?(?:mega\\.nz|mediafire\\.com|fshare\\.vn|dropbox\\.com|1drv\\.ms|onedrive\\.live\\.com)\\/[^\\s<>"')]+/gi;
         const textCloud = combinedRaw.match(cloudRegex) || [];
         if (prevUrl && prevUrl.match(cloudRegex)) textCloud.push(prevUrl);
@@ -3739,7 +3774,7 @@ async def dashboard(request: Request):
           }}
         }});
 
-        // 3. Direct files
+        // Direct files
         const fileRegex = /https?:\\/\\/[^\\s<>"')]+\\.(?:pdf|epub|mobi|azw3?|zip|rar|7z|docx?|xlsx?|mp3|mp4)(?:\\?[^\\s<>"')]*)?/gi;
         const textFiles = combinedRaw.match(fileRegex) || [];
         textFiles.forEach(fl => {{
@@ -3765,75 +3800,28 @@ async def dashboard(request: Request):
         }}
       }}
 
-      // RENDER MEDIA SECTION (IMAGES / VIDEOS)
-      let mediaHtml = '';
-      if (videos.length > 0) {{
-        const vUrl = videos[0];
-        const isDirectVideo = vUrl.endsWith('.mp4') || vUrl.endsWith('.webm') || vUrl.includes('video');
-        mediaHtml += `
-          <div style="margin-bottom: 12px; background: rgba(56, 189, 248, 0.05); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px; padding: 10px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
-              <span style="font-size: 0.72rem; font-weight: 600; color: #38bdf8; display: inline-flex; align-items: center; gap: 4px;">
-                🎬 Video (${{videos.length}})
-              </span>
-              <a href="${{vUrl}}" target="_blank" rel="noopener" class="btn" style="height: 22px; padding: 0 8px; font-size: 0.65rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border-color: rgba(56, 189, 248, 0.35);">
-                ▶ Mở Video
-              </a>
-            </div>
-            ${{isDirectVideo ? `
-              <video controls playsinline preload="metadata" style="width: 100%; max-height: 200px; border-radius: 6px; background: #000; display: block;">
-                <source src="${{vUrl}}">
-              </video>
-            ` : ''}}
-          </div>
-        `;
-      }}
-
-      if (images.length === 1) {{
-        mediaHtml += `
-          <div style="margin-bottom: 12px; border-radius: 8px; overflow: hidden; max-height: 220px; background: #000; border: 1px solid var(--card-border);">
-            <a href="${{images[0]}}" target="_blank" rel="noopener" title="Bấm để xem ảnh gốc">
-              <img src="${{images[0]}}" alt="Media" loading="lazy" style="width: 100%; height: auto; max-height: 220px; object-fit: cover; display: block;">
-            </a>
-          </div>
-        `;
-      }} else if (images.length > 1) {{
-        mediaHtml += `
-          <div style="margin-bottom: 12px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
-              <span style="font-size: 0.7rem; color: var(--text-dim); display: inline-flex; align-items: center; gap: 4px;">
-                🖼️ Hình ảnh (${{images.length}} ảnh)
-              </span>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 6px;">
-              ${{images.slice(0, 4).map(u => `
-                <a href="${{u}}" target="_blank" rel="noopener" style="border-radius: 6px; overflow: hidden; height: 75px; background: #000; display: block; border: 1px solid var(--card-border);" title="Xem ảnh">
-                  <img src="${{u}}" alt="Thumb" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;">
-                </a>
-              `).join('')}}
-            </div>
-          </div>
-        `;
-      }}
-
-      // RENDER ATTACHMENTS SECTION
-      let attachHtml = '';
+      let attachChipsHtml = '';
       if (attachments.length > 0) {{
-        const attachItems = attachments.map(att => {{
+        attachChipsHtml = attachments.map(att => {{
           let icon = '📎';
           let extUpper = (att.ext || '').toUpperCase();
+          let isDriveOrSheet = false;
           if (att.ext === 'gdrive' || (att.url && att.url.includes('drive.google.com'))) {{
             icon = '☁️';
             extUpper = 'GDRIVE';
+            isDriveOrSheet = true;
           }} else if (att.ext === 'gsheet' || (att.url && att.url.includes('docs.google.com/spreadsheets'))) {{
             icon = '📊';
             extUpper = 'GSHEET';
+            isDriveOrSheet = true;
           }} else if (att.ext === 'gdoc' || (att.url && att.url.includes('docs.google.com/document'))) {{
             icon = '📄';
             extUpper = 'GDOC';
+            isDriveOrSheet = true;
           }} else if (att.ext === 'cloud' || (att.url && /mega\\.nz|mediafire|fshare|dropbox|1drv\\.ms/i.test(att.url))) {{
             icon = '☁️';
             extUpper = 'CLOUD';
+            isDriveOrSheet = true;
           }} else if (['EPUB', 'MOBI', 'AZW', 'AZW3'].includes(extUpper)) {{
             icon = '📚';
           }} else if (extUpper === 'PDF') {{
@@ -3846,85 +3834,63 @@ async def dashboard(request: Request):
             icon = '🎬';
           }}
 
+          const cleanName = (att.title || att.url || 'Tệp')
+            .replace(/^https?:\\/\\//i, '')
+            .replace(/^www\\./i, '')
+            .replace(/^drive\\.google\\.com\\/file\\/d\\//i, 'drive/')
+            .replace(/^drive\\.google\\.com\\/drive\\/folders\\//i, 'folder/')
+            .slice(0, 24);
+
+          const chipBg = isDriveOrSheet ? 'rgba(16, 185, 129, 0.12)' : 'rgba(56, 189, 248, 0.1)';
+          const chipBorder = isDriveOrSheet ? 'rgba(16, 185, 129, 0.3)' : 'rgba(56, 189, 248, 0.25)';
+          const chipColor = isDriveOrSheet ? '#34d399' : '#38bdf8';
+
           return `
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; font-size: 0.72rem;">
-              <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
-                <span>${{icon}}</span>
-                <span class="badge gray" style="font-size: 0.6rem; padding: 1px 4px;">${{extUpper || 'FILE'}}</span>
-                <a href="${{att.url}}" target="_blank" rel="noopener" style="color: #38bdf8; text-decoration: underline; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${{att.url}}">
-                  ${{att.title || att.url}}
-                </a>
-              </div>
-              <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
-                <button type="button" class="btn" data-url="${{encodeURIComponent(att.url)}}" onclick="copyAttachmentLink(this)" style="height: 22px; padding: 0 6px; font-size: 0.65rem;" title="Chép URL">
-                  Chép
-                </button>
-                <a href="${{att.url}}" target="_blank" rel="noopener" class="btn primary" style="height: 22px; padding: 0 7px; font-size: 0.65rem;" title="Mở link hoặc tải về">
-                  Mở ↗
-                </a>
-              </div>
-            </div>
+            <a href="${{att.url}}" target="_blank" rel="noopener" class="chip-tag" title="${{att.title || att.url}}" style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 6px; background: ${{chipBg}}; border: 1px solid ${{chipBorder}}; color: ${{chipColor}}; font-size: 0.68rem; font-weight: 500; text-decoration: none; max-width: 175px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; transition: all 0.15s ease;">
+              <span style="font-size: 0.7rem;">${{icon}}</span>
+              <span style="font-weight: 700; font-size: 0.61rem; opacity: 0.9;">${{extUpper}}</span>
+              <span style="overflow: hidden; text-overflow: ellipsis;">${{cleanName}}</span>
+              <span style="opacity: 0.6; font-size: 0.6rem;">↗</span>
+            </a>
           `;
         }}).join('');
-
-        attachHtml = `
-          <div style="margin-top: 12px; padding: 10px; background: rgba(16,185,129,0.06); border: 1px solid rgba(16,185,129,0.22); border-radius: 8px;">
-            <div style="font-size: 0.74rem; font-weight: 700; color: #10b981; margin-bottom: 6px; display: flex; align-items: center; gap: 5px;">
-              <span>📎 File &amp; Link đính kèm (${{attachments.length}}):</span>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 6px;">
-              ${{attachItems}}
-            </div>
-          </div>
-        `;
       }}
 
+      // 6. GÓC PHẢI LÀ THỜI GIAN
       let displayDate = dateStr;
       if (dateStr && (dateStr.includes('T') || !isNaN(Date.parse(dateStr)))) {{
         try {{
           const dObj = new Date(dateStr);
           if (!isNaN(dObj.getTime())) {{
-            displayDate = dObj.toLocaleString('vi-VN', {{ year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }});
+            const hh = String(dObj.getHours()).padStart(2, '0');
+            const mm = String(dObj.getMinutes()).padStart(2, '0');
+            const dd = String(dObj.getDate()).padStart(2, '0');
+            const mo = String(dObj.getMonth() + 1).padStart(2, '0');
+            const yyyy = dObj.getFullYear();
+            displayDate = `${{hh}}:${{mm}} ${{dd}}/${{mo}}/${{yyyy}}`;
           }}
         }} catch(e) {{}}
       }}
 
-      const accentColor = isOut ? '#10b981' : '#38bdf8';
+      const footerHtml = `
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap; min-width: 0; flex: 1;">
+            ${{attachChipsHtml ? attachChipsHtml : `<span style="font-size: 0.68rem; color: var(--text-dim);">#${{idx + 1}}</span>`}}
+          </div>
+          <div style="font-size: 0.68rem; color: var(--text-dim); white-space: nowrap; margin-left: auto;">
+            ${{displayDate}}
+          </div>
+        </div>
+      `;
 
       return `
-        <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; transition: all 0.15s ease; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
+        <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; justify-content: space-between; transition: all 0.15s ease; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
           <div>
-            <!-- Article Title -->
-            <a href="${{link}}" target="_blank" rel="noopener" style="font-size: 0.94rem; font-weight: 700; color: #f8fafc; text-decoration: none; line-height: 1.4; display: block; margin-bottom: 6px;">
-              ${{title}}
-            </a>
-
-            <!-- Metadata info -->
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 0.68rem; color: var(--text-dim); flex-wrap: wrap;">
-              <span>#${{idx + 1}}</span>
-              ${{displayDate ? '<span>•</span><span>' + displayDate + '</span>' : ''}}
-              <a href="${{link}}" target="_blank" rel="noopener" style="color: var(--text-dim); text-decoration: underline; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${{link}}</a>
-            </div>
-
-            <!-- 1. SUMMARIZE SECTION -->
-            <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px;">
-              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                <span style="font-size: 0.72rem; font-weight: 700; color: ${{accentColor}}; display: inline-flex; align-items: center; gap: 4px;">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-                  <span>Tóm tắt nội dung</span>
-                </span>
-                ${{expandBtnHtml}}
-              </div>
-              <div style="font-size: 0.78rem; color: #cbd5e1; line-height: 1.5; word-break: break-word;">${{safeSummary}}</div>
-              ${{fullContentHtml}}
-            </div>
-
-            <!-- 2. IMAGE & VIDEO MEDIA -->
-            ${{mediaHtml}}
-
-            <!-- 3. ATTACHMENTS & LINKS -->
-            ${{attachHtml}}
+            ${{thumbHtml}}
+            ${{titleHtml}}
+            ${{summaryHtml}}
           </div>
+          ${{footerHtml}}
         </div>
       `;
     }}
