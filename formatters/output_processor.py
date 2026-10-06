@@ -22,9 +22,9 @@ def get_data_dir() -> str:
 
 def get_effective_applied_rules(feed_meta: dict = None) -> list:
     feed_meta = feed_meta or {}
-    if "applied_rules" in feed_meta and feed_meta["applied_rules"] is not None:
+    if "applied_rules" in feed_meta and feed_meta["applied_rules"]:
         return list(feed_meta["applied_rules"])
-    # If not explicitly specified on this feed, default to all enabled rules
+    # If not explicitly specified on this feed or empty, default to all enabled rules
     all_rules = load_rules()
     return [r_id for r_id, r in all_rules.items() if r.get("enabled", True)]
 
@@ -117,7 +117,7 @@ def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: 
 
     # 0. Apply Output Rule Pipeline (Global Rules + Custom Rules)
     applied_rules = feed_meta.get("applied_rules")
-    if applied_rules is None:
+    if not applied_rules:
         applied_rules = get_effective_applied_rules(feed_meta)
     custom_rules = feed_meta.get("custom_rules") or []
     if "rules" in query_params:
@@ -310,7 +310,7 @@ def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: 
                     "ext": "gsheet" if is_sheet else ("gdoc" if is_doc else "gdrive")
                 })
 
-        cloud_pattern = r'https?://(?:www\.)?(?:mega\.nz|mediafire\.com|fshare\.vn|dropbox\.com|1drv\.ms|onedrive\.live\.com)/[^\s<>"\'\)]+'
+        cloud_pattern = r'https?://(?:www\.)?(?:mega\.nz|mediafire\.com|fshare\.vn|dropbox\.com|1drv\.ms|onedrive\.live\.com|terabox\.(?:com|app)|box\.com|[a-zA-Z0-9_-]+\.sharepoint\.com)/[^\s<>"\'\)]+'
         found_cloud = re.findall(cloud_pattern, combined_text, re.IGNORECASE)
         if preview_url and re.match(cloud_pattern, preview_url, re.IGNORECASE):
             found_cloud.append(preview_url)
@@ -323,6 +323,9 @@ def process_posts_for_output(posts: list, feed_meta: dict = None, query_params: 
                 elif "mediafire.com" in clink: domain = "Mediafire"
                 elif "dropbox.com" in clink: domain = "Dropbox"
                 elif "onedrive" in clink or "1drv.ms" in clink: domain = "OneDrive"
+                elif "sharepoint.com" in clink: domain = "SharePoint"
+                elif "terabox" in clink: domain = "TeraBox"
+                elif "box.com" in clink: domain = "Box"
                 attachments.append({
                     "type": "cloud",
                     "title": preview_title or f"Tài liệu từ {domain}",

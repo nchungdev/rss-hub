@@ -967,14 +967,21 @@ async def dashboard(request: Request):
                     <div style="color:#34d399; margin-top:2px;">✏️ Đổi thành: <code>"{html.escape(r.get('replacement', ''))}"</code></div>
                 </div>'''
             elif r_type == "filter":
-                type_badge = '<span class="badge red" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.25); font-size:0.68rem;">⛔ Lọc bài</span>'
-                cond = "Bỏ qua nếu khớp (Exclude)" if r.get("condition") == "exclude" else "Chỉ giữ nếu khớp (Include)"
-                pat_preview = r.get("pattern", "")
-                if len(pat_preview) > 55: pat_preview = pat_preview[:52] + "..."
-                preview_box = f'''<div style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:8px 10px; font-family:var(--mono); font-size:0.72rem; color:#cbd5e1; word-break:break-all;">
-                    <div style="color:#f87171;">⚠️ {cond}</div>
-                    <div style="color:#cbd5e1; margin-top:2px;">Mẫu: <code>{html.escape(pat_preview)}</code></div>
-                </div>'''
+                if r.get("filter_type") == "attachments_category" or r_id == "filter_category_attachments":
+                    type_badge = '<span class="badge purple" style="background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.25); font-size:0.68rem;">🎯 Lọc đính kèm</span>'
+                    preview_box = '''<div style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:8px 10px; font-family:var(--mono); font-size:0.72rem; color:#cbd5e1; word-break:break-all;">
+                        <div style="color:#38bdf8;">📂 Thể loại: Truyện tranh, Ebook, Phim ảnh</div>
+                        <div style="color:#f87171; margin-top:2px;">⚠️ Bắt buộc có link đính kèm (Drive, Cloud, File, Phim) - Bỏ qua bài không pass</div>
+                    </div>'''
+                else:
+                    type_badge = '<span class="badge red" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.25); font-size:0.68rem;">⛔ Lọc bài</span>'
+                    cond = "Bỏ qua nếu khớp (Exclude)" if r.get("condition") == "exclude" else "Chỉ giữ nếu khớp (Include)"
+                    pat_preview = r.get("pattern", "")
+                    if len(pat_preview) > 55: pat_preview = pat_preview[:52] + "..."
+                    preview_box = f'''<div style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:8px 10px; font-family:var(--mono); font-size:0.72rem; color:#cbd5e1; word-break:break-all;">
+                        <div style="color:#f87171;">⚠️ {cond}</div>
+                        <div style="color:#cbd5e1; margin-top:2px;">Mẫu: <code>{html.escape(pat_preview)}</code></div>
+                    </div>'''
             elif r_type == "format":
                 type_badge = '<span class="badge green" style="background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.25); font-size:0.68rem;">✨ Làm sạch</span>'
                 clean_txt = "Làm sạch HTML rác & tracking" if r.get("clean_html") else "Định dạng text"

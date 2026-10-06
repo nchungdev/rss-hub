@@ -67,6 +67,19 @@ BUILTIN_RULES = {
         "enabled": True,
         "builtin": True,
         "updated_at": "2026-10-05T00:00:00Z"
+    },
+    "filter_category_attachments": {
+        "id": "filter_category_attachments",
+        "name": "Lọc Link Đính Kèm Theo Thể Loại (Truyện tranh, Ebook, Phim)",
+        "description": "Chỉ giữ lại các bài viết có link đính kèm tài nguyên (Google Drive, Cloud, File sách/truyện/phim, Link xem). Bỏ qua hoàn toàn bài viết không có link đính kèm đúng thể loại.",
+        "rule_type": "filter",
+        "filter_type": "attachments_category",
+        "condition": "include",
+        "target_categories": ["Truyện tranh", "Ebook & Sách", "Phim ảnh", "Ebooks", "Cộng đồng & Sách"],
+        "require_attachments": True,
+        "enabled": True,
+        "builtin": True,
+        "updated_at": "2026-10-06T10:20:00Z"
     }
 }
 
@@ -206,10 +219,115 @@ def apply_replace_rule(post: dict, rule: dict) -> dict:
 
     return post
 
-def apply_filter_rule(post: dict, rule: dict) -> bool:
+def extract_post_resource_links(post: dict) -> list:
+    """
+    Trích xuất toàn bộ liên kết tài nguyên đính kèm từ bài viết:
+    - Google Drive / Docs / Sheets
+    - Cloud Storage (Mega, Fshare, Mediafire, Sharepoint, Terabox, Dropbox, OneDrive, Box)
+    - File sách/truyện (.epub, .pdf, .mobi, .azw, .azw3, .cbr, .cbz, .prc, .fb2)
+    - File phim/video (.mp4, .mkv, .avi, .mov, .flv, .webm, .m4v)
+    - File nén (.zip, .rar, .7z, .tar.gz)
+    - Nguồn phim / Subtitles (subsource, subscene, opensubtitles, mamphim, xemplay, dajonsolo, rophim...)
+    - External URLs có ngữ cảnh tài nguyên
+    """
+    resources = []
+    seen = set()
+
+    def add_res(url, rtype, cat, title=""):
+        if not url: return
+        clean = url.strip().rstrip(".,;:!?'\")")
+        if clean in seen: return
+        seen.add(clean)
+        resources.append({"url": clean, "type": rtype, "category": cat, "title": title or clean})
+
+    # 1. gdrive_links có sẵn
+    for gl in post.get("gdrive_links") or []:
+        add_res(gl, "gdrive", "drive")
+
+    preview_url = post.get("preview_url") or ""
+    preview_title = post.get("preview_title") or ""
+    text = f"{post.get('text', '')} {post.get('description', '')} {post.get('content', '')} {preview_url}"
+
+    # 2. Quét Drive / Docs / Sheets
+    for dl in re.findall(r"https?://(?:drive|docs)\.google\.com/[^\s<>'\"\)\]]+", text):
+        add_res(dl, "gdrive", "drive")
+
+    # 3. Quét Cloud Storage
+    cloud_pat = r"https?://(?:www\.)?(?:mega\.nz|fshare\.vn|mediafire\.com|dropbox\.com|1drv\.ms|onedrive\.live\.com|terabox\.(?:com|app)|box\.com|[a-zA-Z0-9_-]+\.sharepoint\.com)/[^\s<>'\"\)\]]+"
+    for cl in re.findall(cloud_pat, text, re.IGNORECASE):
+        add_res(cl, "cloud", "cloud")
+
+    # 4. Quét File sách, truyện
+    book_pat = r"https?://[^\s<>'\"\)\]]+\.(?:epub|pdf|mobi|azw3?|cbr|cbz|prc|fb2)(?:\?[^\s<>'\"\)\]]*)?"
+    for bf in re.findall(book_pat, text, re.IGNORECASE):
+        add_res(bf, "file_book", "book_comic")
+
+    # 5. Quét File video, phim
+    video_pat = r"https?://[^\s<>'\"\)\]]+\.(?:mp4|mkv|avi|mov|flv|webm|m4v)(?:\?[^\s<>'\"\)\]]*)?"
+    for vf in re.findall(video_pat, text, re.IGNORECASE):
+        add_res(vf, "file_video", "movie")
+
+    # 6. Quét File nén
+    archive_pat = r"https?://[^\s<>'\"\)\]]+\.(?:zip|rar|7z|tar\.gz)(?:\?[^\s<>'\"\)\]]*)?"
+    for af in re.findall(archive_pat, text, re.IGNORECASE):
+        add_res(af, "file_archive", "archive")
+
+    # 7. Quét Web xem phim / Phụ đề
+    movie_web_pat = r"https?://(?:www\.)?(?:subsource\.net|subscene\.best|opensubtitles\.org|mamphim\.site|xemplay\.com|dajonsolo\.com|rophim\.[a-z]+|motchill\.[a-z]+|fimfast\.[a-z]+|phimmoi\.[a-z]+|tvhay\.[a-z]+|bilutv\.[a-z]+|dongphym\.[a-z]+|netflix\.com|youtube\.com/watch\?v=|youtu\.be)/[^\s<>'\"\)\]]*"
+    for mw in re.findall(movie_web_pat, text, re.IGNORECASE):
+        add_res(mw, "movie_web", "movie")
+
+    # 8. Video nhúng hoặc enclosure
+    if post.get("videos"):
+        for v in post["videos"]:
+            add_res(v, "video", "movie")
+
+    if post.get("enclosure") and isinstance(post["enclosure"], dict) and post["enclosure"].get("url"):
+        enc_url = post["enclosure"]["url"]
+        add_res(enc_url, "enclosure", "general")
+
+    # 9. External URLs có ngữ cảnh tài nguyên
+    for u in re.findall(r"https?://[^\s<>'\"\)\]]+", text):
+        u_clean = u.rstrip(".,;:!?'\")")
+        if not any(ign in u_clean.lower() for ign in ["threads.net", "instagram.com", "facebook.com", "twitter.com", "x.com", "tiktok.com"]):
+            if preview_title and any(kw in preview_title.lower() for kw in ["phim", "movie", "sách", "truyện", "comic", "manga", "drive", "download", "tải", "sub"]):
+                add_res(u_clean, "external_resource", "general", preview_title)
+
+    return resources
+
+def apply_filter_rule(post: dict, rule: dict, feed_meta: dict = None) -> bool:
     """
     Returns True if post should be KEPT, False if dropped.
     """
+    # 0. LỌC LINK ĐÍNH KÈM THEO THỂ LOẠI (Truyện tranh, Ebook, Phim)
+    if rule.get("filter_type") == "attachments_category" or rule.get("id") == "filter_category_attachments" or rule.get("require_category_links"):
+        feed_cat = (feed_meta or {}).get("category", "")
+        feed_cat_lower = feed_cat.lower() if feed_cat else ""
+        target_cats = [c.lower() for c in (rule.get("target_categories") or ["truyện tranh", "ebook", "phim", "sách", "comics", "manga"])]
+
+        # Nếu feed thuộc danh mục tin tức/khác hoàn toàn ngoài target_categories -> bỏ qua rule này (pass through)
+        if feed_cat_lower and not any(tc in feed_cat_lower for tc in target_cats) and not any(tc in feed_cat_lower for tc in ["chung", "threads", "mạng xã hội"]):
+            return True
+
+        resources = extract_post_resource_links(post)
+        if not resources:
+            # Bài viết không có link đính kèm tài nguyên nào -> Coi như bỏ qua!
+            return False
+
+        # Kiểm tra tính phù hợp với thể loại của feed nếu có
+        text_full = f"{post.get('title', '')} {post.get('preview_title', '')} {post.get('text', '')}".lower()
+        if any(kw in feed_cat_lower for kw in ["truyện", "comic", "manga"]):
+            is_comic = any(r["type"] in ("gdrive", "cloud", "file_book", "file_archive") for r in resources) or any(kw in text_full for kw in ["truyện", "manga", "comic", "chap", "tập", "kindle"])
+            return is_comic
+        elif any(kw in feed_cat_lower for kw in ["ebook", "sách"]):
+            is_book = any(r["type"] in ("gdrive", "cloud", "file_book", "file_archive") for r in resources) or any(kw in text_full for kw in ["sách", "ebook", "tài liệu", "đọc", "tác giả"])
+            return is_book
+        elif any(kw in feed_cat_lower for kw in ["phim", "movie"]):
+            is_movie = any(r["type"] in ("movie_web", "file_video", "gdrive", "cloud") for r in resources) or any(kw in text_full for kw in ["phim", "movie", "sub", "vietsub", "tập"])
+            return is_movie
+
+        return True
+
     condition = rule.get("condition", "exclude") # exclude = drop if matched, include = keep only if matched
     target_field = rule.get("target_field", "all")
     pattern = rule.get("pattern", "")
@@ -219,6 +337,7 @@ def apply_filter_rule(post: dict, rule: dict) -> bool:
     max_length = int(rule.get("max_length") or 0)
     require_images = rule.get("require_images", False)
     require_links = rule.get("require_links", False)
+    require_attachments = rule.get("require_attachments", False)
 
     text = post.get("text") or post.get("description") or post.get("content") or ""
     title = post.get("title") or post.get("preview_title") or post.get("_formatted_title") or ""
@@ -230,7 +349,10 @@ def apply_filter_rule(post: dict, rule: dict) -> bool:
     if require_images and not images:
         return False
 
-    if require_links and not (url or post.get("gdrive_links") or re.search(r"https?://", text)):
+    if require_links and not (post.get("gdrive_links") or re.search(r"https?://", text)):
+        return False
+
+    if require_attachments and not extract_post_resource_links(post):
         return False
 
     if min_length > 0 and len(text) < min_length:
@@ -384,7 +506,7 @@ def apply_extract_links_rule(post: dict, rule: dict) -> dict:
 
     return post
 
-def execute_rule(post: dict, rule: dict) -> tuple[dict, bool]:
+def execute_rule(post: dict, rule: dict, feed_meta: dict = None) -> tuple[dict, bool]:
     """
     Executes a single rule on a post dictionary.
     Returns (modified_post, keep_post_bool).
@@ -394,7 +516,7 @@ def execute_rule(post: dict, rule: dict) -> tuple[dict, bool]:
 
     rtype = rule.get("rule_type", "replace")
     if rtype == "filter":
-        keep = apply_filter_rule(post, rule)
+        keep = apply_filter_rule(post, rule, feed_meta=feed_meta)
         return post, keep
     elif rtype == "replace":
         post = apply_replace_rule(post, rule)
@@ -434,7 +556,7 @@ def run_pipeline(posts: list, rule_ids: list = None, custom_rules: list = None, 
         post_item = dict(p)
         keep = True
         for rule in pipeline:
-            post_item, keep = execute_rule(post_item, rule)
+            post_item, keep = execute_rule(post_item, rule, feed_meta=feed_meta)
             if not keep:
                 break
         if keep:
