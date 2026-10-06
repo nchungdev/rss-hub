@@ -3879,34 +3879,21 @@ async def dashboard(request: Request):
         `;
       }}
 
-      const hasDrive = attachments.some(a => a.ext === 'gdrive' || (a.url && a.url.includes('drive.google.com')));
-      const hasSheet = attachments.some(a => a.ext === 'gsheet' || (a.url && a.url.includes('docs.google.com/spreadsheets')));
-      const hasOtherFiles = attachments.length > 0 && !hasDrive && !hasSheet;
+      let displayDate = dateStr;
+      if (dateStr && (dateStr.includes('T') || !isNaN(Date.parse(dateStr)))) {{
+        try {{
+          const dObj = new Date(dateStr);
+          if (!isNaN(dObj.getTime())) {{
+            displayDate = dObj.toLocaleString('vi-VN', {{ year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }});
+          }}
+        }} catch(e) {{}}
+      }}
 
-      const jsonId = 'post_' + type + '_' + idx;
-      const jsonStr = encodeURIComponent(JSON.stringify(item, null, 2));
-      const clickFilterFn = isOut ? `onOutputFeedFilterChange('${{feedSlug}}')` : `onRawFeedFilterChange('${{feedSlug}}')`;
       const accentColor = isOut ? '#10b981' : '#38bdf8';
 
       return `
         <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; transition: all 0.15s ease; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
           <div>
-            <!-- Top Badges & JSON trigger -->
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
-              <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                <span class="badge gray" style="font-size: 0.68rem; cursor: pointer; font-weight: 600;" onclick="${{clickFilterFn}}" title="Lọc theo kênh này">${{feedTitle}}</span>
-                <span class="badge blue" style="font-size: 0.64rem;">${{feedCat}}</span>
-                ${{hasDrive ? '<span class="badge" style="font-size:0.65rem; background:rgba(16,185,129,0.18); color:#34d399; border:1px solid rgba(16,185,129,0.35); font-weight:700;">☁️ Google Drive</span>' : ''}}
-                ${{hasSheet ? '<span class="badge" style="font-size:0.65rem; background:rgba(16,185,129,0.18); color:#34d399; border:1px solid rgba(16,185,129,0.35); font-weight:700;">📊 Google Sheets</span>' : ''}}
-                ${{hasOtherFiles ? '<span class="badge" style="font-size:0.65rem; background:rgba(56,189,248,0.18); color:#38bdf8; border:1px solid rgba(56,189,248,0.35); font-weight:600;">📎 ' + attachments.length + ' File</span>' : ''}}
-                ${{isOut && item._applied_rules && item._applied_rules.length ? '<span style="font-size:0.65rem; color:#a855f7; font-weight:500;">⚡ ' + item._applied_rules.join(', ') + '</span>' : ''}}
-                ${{!isOut ? '<span class="badge" style="font-size:0.64rem; background:rgba(56,189,248,0.12); color:#38bdf8; font-weight:600;">RAW</span>' : ''}}
-              </div>
-              <button type="button" class="btn" onclick="toggleItemJson('${{jsonId}}')" style="height: 22px; padding: 0 7px; font-size: 0.65rem; color: var(--text-dim);" title="Xem cấu trúc JSON">
-                JSON
-              </button>
-            </div>
-
             <!-- Article Title -->
             <a href="${{link}}" target="_blank" rel="noopener" style="font-size: 0.94rem; font-weight: 700; color: #f8fafc; text-decoration: none; line-height: 1.4; display: block; margin-bottom: 6px;">
               ${{title}}
@@ -3915,7 +3902,7 @@ async def dashboard(request: Request):
             <!-- Metadata info -->
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 0.68rem; color: var(--text-dim); flex-wrap: wrap;">
               <span>#${{idx + 1}}</span>
-              ${{dateStr ? '<span>•</span><span>' + dateStr + '</span>' : ''}}
+              ${{displayDate ? '<span>•</span><span>' + displayDate + '</span>' : ''}}
               <a href="${{link}}" target="_blank" rel="noopener" style="color: var(--text-dim); text-decoration: underline; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${{link}}</a>
             </div>
 
@@ -3938,9 +3925,6 @@ async def dashboard(request: Request):
             <!-- 3. ATTACHMENTS & LINKS -->
             ${{attachHtml}}
           </div>
-
-          <!-- Collapsible JSON -->
-          <pre id="${{jsonId}}" style="display: none; margin-top: 12px; padding: 10px; background: #0b0f19; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; font-family: var(--mono); font-size: 0.66rem; color: #94a3b8; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all;">${{decodeURIComponent(jsonStr)}}</pre>
         </div>
       `;
     }}
