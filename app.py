@@ -1508,6 +1508,61 @@ async def dashboard(request: Request):
       }}
     }}
 
+    /* Waterfall (Masonry) & Post Layouts */
+    .posts-waterfall-layout {{
+      column-width: 320px;
+      column-gap: 14px;
+      display: block !important;
+    }}
+    .posts-waterfall-layout > .post-card {{
+      break-inside: avoid;
+      -webkit-column-break-inside: avoid;
+      page-break-inside: avoid;
+      margin-bottom: 14px;
+      display: block;
+    }}
+    .posts-grid-layout {{
+      display: grid !important;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)) !important;
+      gap: 14px !important;
+      align-items: start !important;
+      column-width: auto !important;
+    }}
+    .posts-grid-layout > .post-card {{
+      margin-bottom: 0;
+      display: block;
+    }}
+    .posts-list-layout {{
+      display: grid !important;
+      grid-template-columns: 1fr !important;
+      gap: 14px !important;
+      align-items: start !important;
+      column-width: auto !important;
+    }}
+    .posts-list-layout > .post-card {{
+      margin-bottom: 0;
+      display: block;
+    }}
+    .post-card {{
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 14px;
+      box-sizing: border-box;
+      transition: all 0.15s ease;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }}
+    .post-card:hover {{
+      border-color: rgba(255, 255, 255, 0.22);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+    }}
+    @media (max-width: 768px) {{
+      .posts-waterfall-layout {{
+        column-width: 100% !important;
+      }}
+    }}
+
     /* Task / Feed Cards */
     .task-list {{
       display: flex;
@@ -2144,7 +2199,10 @@ async def dashboard(request: Request):
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <!-- Layout toggle -->
             <div style="display: inline-flex; background: rgba(255,255,255,0.04); padding: 2px; border-radius: 6px; border: 1px solid var(--card-border); gap: 2px; height: 34px; align-items: center; box-sizing: border-box;">
-              <button type="button" class="btn-toggle active" id="btnOutputLayoutGrid" onclick="setOutputViewLayout('grid')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng lưới">
+              <button type="button" class="btn-toggle active" id="btnOutputLayoutMasonry" onclick="setOutputViewLayout('masonry')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng thác nước (Masonry - Chiều cao tự do)">
+                <span>Thác nước</span>
+              </button>
+              <button type="button" class="btn-toggle" id="btnOutputLayoutGrid" onclick="setOutputViewLayout('grid')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng lưới">
                 <span>Lưới</span>
               </button>
               <button type="button" class="btn-toggle" id="btnOutputLayoutList" onclick="setOutputViewLayout('list')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng danh sách dọc">
@@ -2166,9 +2224,9 @@ async def dashboard(request: Request):
           </div>
         </div>
 
-        <!-- Output Posts Container (Responsive grid) -->
-        <div id="outputPostsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px;">
-          <div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-dim);">Đang tải dữ liệu Task Output...</div>
+        <!-- Output Posts Container (Waterfall default) -->
+        <div id="outputPostsList" class="posts-waterfall-layout">
+          <div style="column-span: all; grid-column: 1 / -1; width: 100%; text-align: center; padding: 40px; color: var(--text-dim);">Đang tải dữ liệu Task Output...</div>
         </div>
       </div>
 
@@ -2190,7 +2248,10 @@ async def dashboard(request: Request):
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <!-- Layout toggle -->
             <div style="display: inline-flex; background: rgba(255,255,255,0.04); padding: 2px; border-radius: 6px; border: 1px solid var(--card-border); gap: 2px; height: 34px; align-items: center; box-sizing: border-box;">
-              <button type="button" class="btn-toggle active" id="btnRawLayoutGrid" onclick="setRawViewLayout('grid')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng lưới">
+              <button type="button" class="btn-toggle active" id="btnRawLayoutMasonry" onclick="setRawViewLayout('masonry')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng thác nước (Masonry - Chiều cao tự do)">
+                <span>Thác nước</span>
+              </button>
+              <button type="button" class="btn-toggle" id="btnRawLayoutGrid" onclick="setRawViewLayout('grid')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng lưới">
                 <span>Lưới</span>
               </button>
               <button type="button" class="btn-toggle" id="btnRawLayoutList" onclick="setRawViewLayout('list')" style="height: 28px; padding: 0 9px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" title="Hiển thị dạng danh sách dọc">
@@ -2212,9 +2273,9 @@ async def dashboard(request: Request):
           </div>
         </div>
 
-        <!-- Raw Posts Container (Responsive grid) -->
-        <div id="rawPostsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px;">
-          <div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-dim);">Đang tải dữ liệu Scraped RAW...</div>
+        <!-- Raw Posts Container (Waterfall default) -->
+        <div id="rawPostsList" class="posts-waterfall-layout">
+          <div style="column-span: all; grid-column: 1 / -1; width: 100%; text-align: center; padding: 40px; color: var(--text-dim);">Đang tải dữ liệu Scraped RAW...</div>
         </div>
       </div>
 
@@ -3382,8 +3443,8 @@ async def dashboard(request: Request):
     let currentRawSearchQuery = '';
     let currentOutputOnlyAttach = false;
     let currentRawOnlyAttach = false;
-    let outputViewMode = 'grid'; // 'grid' | 'list'
-    let rawViewMode = 'grid'; // 'grid' | 'list'
+    let outputViewMode = 'masonry'; // 'masonry' | 'grid' | 'list'
+    let rawViewMode = 'masonry'; // 'masonry' | 'grid' | 'list'
 
     function postHasAttachmentsOrDrive(p) {{
       if (p._attachments && p._attachments.length > 0) return true;
@@ -3433,12 +3494,14 @@ async def dashboard(request: Request):
     function setOutputViewLayout(mode) {{
       outputViewMode = mode;
       const container = document.getElementById('outputPostsList');
+      const btnMasonry = document.getElementById('btnOutputLayoutMasonry');
       const btnGrid = document.getElementById('btnOutputLayoutGrid');
       const btnList = document.getElementById('btnOutputLayoutList');
       if (container) {{
-        container.style.gridTemplateColumns = mode === 'list' ? '1fr' : 'repeat(auto-fill, minmax(360px, 1fr))';
+        container.className = mode === 'masonry' ? 'posts-waterfall-layout' : (mode === 'list' ? 'posts-list-layout' : 'posts-grid-layout');
       }}
-      if (btnGrid && btnList) {{
+      if (btnMasonry && btnGrid && btnList) {{
+        btnMasonry.classList.toggle('active', mode === 'masonry');
         btnGrid.classList.toggle('active', mode === 'grid');
         btnList.classList.toggle('active', mode === 'list');
       }}
@@ -3447,12 +3510,14 @@ async def dashboard(request: Request):
     function setRawViewLayout(mode) {{
       rawViewMode = mode;
       const container = document.getElementById('rawPostsList');
+      const btnMasonry = document.getElementById('btnRawLayoutMasonry');
       const btnGrid = document.getElementById('btnRawLayoutGrid');
       const btnList = document.getElementById('btnRawLayoutList');
       if (container) {{
-        container.style.gridTemplateColumns = mode === 'list' ? '1fr' : 'repeat(auto-fill, minmax(360px, 1fr))';
+        container.className = mode === 'masonry' ? 'posts-waterfall-layout' : (mode === 'list' ? 'posts-list-layout' : 'posts-grid-layout');
       }}
-      if (btnGrid && btnList) {{
+      if (btnMasonry && btnGrid && btnList) {{
+        btnMasonry.classList.toggle('active', mode === 'masonry');
         btnGrid.classList.toggle('active', mode === 'grid');
         btnList.classList.toggle('active', mode === 'list');
       }}
@@ -3501,8 +3566,8 @@ async def dashboard(request: Request):
     function reloadAllPostsData() {{
       const outList = document.getElementById('outputPostsList');
       const rawList = document.getElementById('rawPostsList');
-      if (outList) outList.innerHTML = '<div style="grid-column: 1 / -1; text-align:center; padding:40px; color:var(--text-dim);"><svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-bottom: 8px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><br>Đang tải dữ liệu Task Output...</div>';
-      if (rawList) rawList.innerHTML = '<div style="grid-column: 1 / -1; text-align:center; padding:40px; color:var(--text-dim);"><svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-bottom: 8px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><br>Đang tải dữ liệu Scraped RAW...</div>';
+      if (outList) outList.innerHTML = '<div style="column-span: all; grid-column: 1 / -1; width: 100%; text-align:center; padding:40px; color:var(--text-dim);"><svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-bottom: 8px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><br>Đang tải dữ liệu Task Output...</div>';
+      if (rawList) rawList.innerHTML = '<div style="column-span: all; grid-column: 1 / -1; width: 100%; text-align:center; padding:40px; color:var(--text-dim);"><svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-bottom: 8px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><br>Đang tải dữ liệu Scraped RAW...</div>';
 
       fetch('/api/dashboard/posts?slug=all')
         .then(r => {{
@@ -3549,8 +3614,8 @@ async def dashboard(request: Request):
         }})
         .catch(err => {{
           console.error(err);
-          if (outList) outList.innerHTML = '<div style="grid-column: 1 / -1; text-align:center; padding:30px; color:#f87171;">Lỗi tải dữ liệu: ' + err + '</div>';
-          if (rawList) rawList.innerHTML = '<div style="grid-column: 1 / -1; text-align:center; padding:30px; color:#f87171;">Lỗi tải dữ liệu: ' + err + '</div>';
+          if (outList) outList.innerHTML = '<div style="column-span: all; grid-column: 1 / -1; width: 100%; text-align:center; padding:30px; color:#f87171;">Lỗi tải dữ liệu: ' + err + '</div>';
+          if (rawList) rawList.innerHTML = '<div style="column-span: all; grid-column: 1 / -1; width: 100%; text-align:center; padding:30px; color:#f87171;">Lỗi tải dữ liệu: ' + err + '</div>';
         }});
     }}
 
@@ -3577,7 +3642,7 @@ async def dashboard(request: Request):
       const outList = document.getElementById('outputPostsList');
       if (outList) {{
         if (filtered.length === 0) {{
-          outList.innerHTML = '<div style="grid-column: 1 / -1; text-align:center; padding:48px; color:var(--text-dim); background:var(--card-bg); border-radius:12px; border:1px dashed var(--card-border);">Không có bài viết output nào phù hợp với bộ lọc.</div>';
+          outList.innerHTML = '<div style="column-span: all; grid-column: 1 / -1; width: 100%; text-align:center; padding:48px; color:var(--text-dim); background:var(--card-bg); border-radius:12px; border:1px dashed var(--card-border);">Không có bài viết output nào phù hợp với bộ lọc.</div>';
         }} else {{
           outList.innerHTML = filtered.map((item, idx) => renderPostCard(item, idx, 'output')).join('');
         }}
@@ -3604,7 +3669,7 @@ async def dashboard(request: Request):
       const rawList = document.getElementById('rawPostsList');
       if (rawList) {{
         if (filtered.length === 0) {{
-          rawList.innerHTML = '<div style="grid-column: 1 / -1; text-align:center; padding:48px; color:var(--text-dim); background:var(--card-bg); border-radius:12px; border:1px dashed var(--card-border);">Không có bài viết RAW nào phù hợp với bộ lọc.</div>';
+          rawList.innerHTML = '<div style="column-span: all; grid-column: 1 / -1; width: 100%; text-align:center; padding:48px; color:var(--text-dim); background:var(--card-bg); border-radius:12px; border:1px dashed var(--card-border);">Không có bài viết RAW nào phù hợp với bộ lọc.</div>';
         }} else {{
           rawList.innerHTML = filtered.map((item, idx) => renderPostCard(item, idx, 'raw')).join('');
         }}
@@ -3873,7 +3938,7 @@ async def dashboard(request: Request):
       }}
 
       const footerHtml = `
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); flex-wrap: wrap;">
           <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap; min-width: 0; flex: 1;">
             ${{attachChipsHtml ? attachChipsHtml : `<span style="font-size: 0.68rem; color: var(--text-dim);">#${{idx + 1}}</span>`}}
           </div>
@@ -3884,12 +3949,10 @@ async def dashboard(request: Request):
       `;
 
       return `
-        <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; justify-content: space-between; transition: all 0.15s ease; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
-          <div>
-            ${{thumbHtml}}
-            ${{titleHtml}}
-            ${{summaryHtml}}
-          </div>
+        <div class="post-card">
+          ${{thumbHtml}}
+          ${{titleHtml}}
+          ${{summaryHtml}}
           ${{footerHtml}}
         </div>
       `;
